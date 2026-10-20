@@ -560,6 +560,7 @@ window.__ModuleLoader__.load({
                 due: task.due === null ? '' : task.due,
                 tags: task.tags.join(', '),
                 workspaceId: task.workspaceId === null || task.workspaceId === undefined ? '' : task.workspaceId,
+                workspacePath: task.workspacePath === null || task.workspacePath === undefined ? '' : task.workspacePath,
                 permission: task.permission === null || task.permission === undefined ? '' : task.permission,
                 cwd: task.cwd === null || task.cwd === undefined ? '' : task.cwd,
             }));
@@ -613,7 +614,8 @@ window.__ModuleLoader__.load({
                 setForm((previous) => {
                     const next = Object.assign({}, previous, patch);
                     const chosen = workspaces.find((entry) => entry.id === next.workspaceId);
-                    const payload = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: chosen === undefined ? null : chosen.path, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim() };
+                    const storedPath = next.workspacePath !== '' ? next.workspacePath : chosen === undefined ? '' : chosen.path;
+                    const payload = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: next.workspaceId === '' || storedPath === '' ? null : storedPath, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim() };
                     if (next.title.trim() !== '')
                         payload.title = next.title.trim();
                     pendingRef.current = payload;
@@ -685,7 +687,11 @@ window.__ModuleLoader__.load({
             }))), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.workspace')), h('select', {
                 className: 'tc-input',
                 value: form.workspaceId,
-                onChange: (event) => stage({ workspaceId: event.target.value }),
+                onChange: (event) => {
+                    const nextId = event.target.value;
+                    const found = workspaces.find((entry) => entry.id === nextId);
+                    stage({ workspaceId: nextId, workspacePath: nextId === '' || found === undefined ? '' : found.path });
+                },
             }, h('option', { value: '' }, t('noWorkspace')), workspaces.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.title + ' — ' + entry.path))), h('span', { className: 'tc-fieldhint' }, t('workspaceHint'))), h('div', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('newDir')), h('div', { className: 'tc-inline' }, h('input', {
                 className: 'tc-input tc-path',
                 value: dirDraft,
@@ -705,7 +711,7 @@ window.__ModuleLoader__.load({
                         if (created === null)
                             return;
                         setDirDraft('');
-                        stage({ workspaceId: created.id });
+                        stage({ workspaceId: created.id, workspacePath: created.path });
                     }, () => setDirBusy(false));
                 },
             }, t('addWorkspace')))), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.permission')), h('select', {
