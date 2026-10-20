@@ -44,6 +44,9 @@ function makeHost(options = {}) {
         },
       }
       agents.set(id, agent)
+      // Optional: let a test deliver events before `create()` resolves, which is
+      // the window where an idle can beat the runner's own bookkeeping.
+      if (options.afterCreate !== undefined) options.afterCreate(agent)
       return { sessionId: id }
     },
     async resolveAgent(sessionId) {
@@ -593,6 +596,29 @@ test('the workspace and permission routes feed the drawer', async () => {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('an idle that beats the session mapping still closes the run', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    // The agent reports idle while `create()` is still resolving, i.e. before the
+    // runner has any chance to record which task owns the session.
+    const host = makeHost({
+      afterCreate: (agent) => host.emit('agent/status', { agent, status: 'idle' }),
+    })
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '抢跑', cwd: 'C:/work/early' })
+
+    await runner.start(task.id)
+    const row = await waitFor(async () => {
+      const entry = (await store.list()).tasks.find((candidate) => candidate.id === task.id)
+      return entry.run !== null && entry.run.status === 'done' ? entry : null
+    })
+    assert.equal(row.status, 'doing')
+    await dispose()
+  } finally {
+    await dispose()
   }
 })
 

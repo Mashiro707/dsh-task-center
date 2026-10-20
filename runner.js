@@ -265,6 +265,8 @@ export function createRunner(ctx, store) {
     const timers = new Map();
     /** callId -> the call that is waiting for an approval answer. */
     const pendingCalls = new Map();
+    /** Sessions that reported idle before this runner knew which task owns them. */
+    const earlyIdle = new Set();
     let settings = null;
     const approvals = { approved: 0, delegated: 0, seen: 0 };
     // Counted so a stuck "running" row can be explained from the outside: either
@@ -524,7 +526,7 @@ export function createRunner(ctx, store) {
             }
         }
         armTimeout(task.id, agent.id, config.timeoutMinutes);
-        return store.update({
+        const record = await store.update({
             id: task.id,
             status: 'doing',
             run: {
@@ -536,6 +538,10 @@ export function createRunner(ctx, store) {
                 attempts: attempt,
             },
         });
+        // The session may have reported idle before this row existed; honour it now.
+        if (earlyIdle.delete(agent.id))
+            void settle(task.id, agent.id, 'done', null);
+        return record;
     }
     /**
      * Park one task until a slot frees up.
@@ -751,10 +757,50 @@ export function createRunner(ctx, store) {
             diagnostics.statusSamples.push(`${scope}:${agentId}:${String(payload?.status)}`);
         }
         const sessionId = payload?.agent?.id ?? '';
+        if (sessionId === '')
+            return;
         const taskId = sessionToTask.get(sessionId);
-        if (taskId === undefined || payload?.status === 'running')
+        if (taskId === undefined) {
+            // An idle can beat the mapping: `create()` resolves before this runner
+            // records which task owns the session. Adopt the row instead of dropping
+            // the only chance to close it.
+            if (payload?.status === 'running')
+                return;
+            void adopt(sessionId).then((adopted) => {
+                if (adopted !== undefined) {
+                    void settle(adopted, sessionId, 'done', null);
+                    return;
+                }
+                // Nothing owns it yet: remember the idle so the launch that is still
+                // resolving can close itself the moment it records the session.
+                if (earlyIdle.size < 64)
+                    earlyIdle.add(sessionId);
+            });
+            return;
+        }
+        if (payload?.status === 'running')
             return;
         void settle(taskId, sessionId, 'done', null);
+    }
+    /**
+     * Find the task that owns a session this runner has not mapped yet.
+     * @param {string} sessionId - the session that went idle.
+     * @returns {Promise<string | undefined>} the owning task id, when found.
+     */
+    async function adopt(sessionId) {
+        try {
+            const board = await store.list();
+            const owner = board.tasks.find(entry => entry.run !== null && entry.run.sessionId === sessionId && entry.run.status === 'running');
+            if (owner === undefined)
+                return undefined;
+            sessionToTask.set(sessionId, owner.id);
+            taskToSession.set(owner.id, sessionId);
+            note(`adopted ${owner.id} from ${sessionId}`);
+            return owner.id;
+        }
+        catch {
+            return undefined;
+        }
     }
     function onAgentError(payload, scope) {
         const sessionId = payload?.agent?.id ?? '';
