@@ -734,6 +734,9 @@ test('an approval that stays inside the workspace is answered without the user',
     )
     assert.deepEqual(relative, ['allowed-once'])
     assert.equal(asked, false)
+    const stats = runner.stats()
+    assert.equal(stats.autoApproved, 2, 'both in-workspace approvals are counted')
+    assert.equal(stats.autoDelegated, 0)
   } finally {
     await dispose()
   }
@@ -765,6 +768,9 @@ test('an approval that leaves the workspace still goes to the user', async () =>
       assert.deepEqual(results, ['unavailable'])
       assert.equal(asked, true)
     }
+    const stats = runner.stats()
+    assert.equal(stats.autoDelegated, 3, 'every out-of-workspace call is handed back')
+    assert.equal(stats.autoApproved, 0)
   } finally {
     await dispose()
   }

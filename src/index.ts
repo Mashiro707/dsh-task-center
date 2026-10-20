@@ -1019,6 +1019,7 @@ export function apply(ctx: HostContext): void {
     cancelRun: input => runner.cancel(requireId(input)),
     settings: async () => ({
       ...(await runner.settings()),
+      ...runner.stats(),
       available: service(ctx, 'sessionController') !== undefined,
     }),
     saveSettings: input => runner.saveSettings(input),

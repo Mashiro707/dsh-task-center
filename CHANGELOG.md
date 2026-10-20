@@ -16,6 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the page still asks you. The sandbox mode keeps applying either way.
 - An auto-approval switch in the drawer, and `auto_approve` on `task_create` /
   `task_update`.
+- The `settings` action also reports `autoApproved` / `autoDelegated`, the
+  number of approvals this host has answered or handed back since it started.
 
 ## [1.3.0] - 2026-10-20
 

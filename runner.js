@@ -262,6 +262,7 @@ export function createRunner(ctx, store) {
     /** callId -> the call that is waiting for an approval answer. */
     const pendingCalls = new Map();
     let settings = null;
+    const approvals = { approved: 0, delegated: 0 };
     let disposed = false;
     let draining = false;
     /**
@@ -717,13 +718,16 @@ export function createRunner(ctx, store) {
                     return await next();
                 const verdict = classifyCall(call.args, root);
                 if (verdict !== 'inside') {
+                    approvals.delegated += 1;
                     ctx.logger?.info?.(`[task-center] ${request.toolName} 越过工作区，交给你确认。`);
                     return await next();
                 }
+                approvals.approved += 1;
                 ctx.logger?.info?.(`[task-center] 工作区内自动批准 ${request.toolName}（任务 ${taskId}）。`);
                 return 'allowed-once';
             }
             catch (error) {
+                approvals.delegated += 1;
                 ctx.logger?.warn?.(`[task-center] 自动批准判断失败，交给用户：${describe(error)}`);
                 return await next();
             }
@@ -760,6 +764,9 @@ export function createRunner(ctx, store) {
             return { queued: [...queue], running: taskToSession.size, concurrency: config.concurrency };
         },
         settings: readSettings,
+        stats() {
+            return { autoApproved: approvals.approved, autoDelegated: approvals.delegated };
+        },
         async saveSettings(patch = {}) {
             const current = await readSettings();
             const next = normalizeSettings({
