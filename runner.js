@@ -267,6 +267,22 @@ export function createRunner(ctx, store) {
     const pendingCalls = new Map();
     let settings = null;
     const approvals = { approved: 0, delegated: 0, seen: 0 };
+    // Counted so a stuck "running" row can be explained from the outside: either
+    // the status event never arrives, or it arrives without the agent we need.
+    const diagnostics = {
+        statusEvents: 0,
+        statusSamples: [],
+        eventTypes: new Map(),
+        notes: [],
+    };
+    /**
+     * Keep one short breadcrumb for the settings response.
+     * @param {string} line - what happened.
+     */
+    function note(line) {
+        if (diagnostics.notes.length < 12)
+            diagnostics.notes.push(line);
+    }
     let disposed = false;
     let draining = false;
     /**
@@ -341,8 +357,10 @@ export function createRunner(ctx, store) {
      * @returns {Promise<void>} resolves once the store is updated.
      */
     async function settle(taskId, sessionId, status, message, options = {}) {
-        if (sessionToTask.get(sessionId) !== taskId)
+        if (sessionToTask.get(sessionId) !== taskId) {
+            note(`settle ${taskId}: 会话已不在本 runner 名下`);
             return;
+        }
         sessionToTask.delete(sessionId);
         taskToSession.delete(taskId);
         stopping.delete(taskId);
@@ -363,8 +381,10 @@ export function createRunner(ctx, store) {
             const board = await store.list();
             const task = board.tasks.find(entry => entry.id === taskId);
             const run = task?.run ?? null;
-            if (task === undefined || run === null || run.sessionId !== sessionId)
+            if (task === undefined || run === null || run.sessionId !== sessionId) {
+                note(`settle ${taskId}: 任务行已被替换（${run?.sessionId ?? 'null'}）`);
                 return;
+            }
             attempts = run.attempts;
             retryable = options.retry === true && message !== null;
             await store.update({
@@ -722,7 +742,11 @@ export function createRunner(ctx, store) {
         })();
     }
     ctx.on('agent/status', (payload) => {
-        const taskId = sessionToTask.get(payload.agent.id);
+        diagnostics.statusEvents += 1;
+        if (diagnostics.statusEvents <= 6) {
+            diagnostics.statusSamples.push(`${typeof payload?.agent?.id === 'string' ? payload.agent.id : 'no-agent'}:${String(payload?.status)}`);
+        }
+        const taskId = sessionToTask.get(payload?.agent?.id ?? '');
         if (taskId === undefined || payload.status === 'running')
             return;
         void settle(taskId, payload.agent.id, 'done', null);
@@ -742,6 +766,12 @@ export function createRunner(ctx, store) {
     // Remember what each call asked for: the approval request carries only the
     // call id, so the arguments are read back from the session log.
     ctx.on('session/event', (session, event) => {
+        if (diagnostics.eventTypes.size < 64) {
+            const key = String(event?.type ?? '?');
+            diagnostics.eventTypes.set(key, (diagnostics.eventTypes.get(key) ?? 0) + 1);
+        }
+        if (event.type === 'turn/end')
+            note(`turn/end ${session.id}`);
         if (event.type !== 'tool/call')
             return;
         const data = (event.data ?? {});
@@ -843,6 +873,10 @@ export function createRunner(ctx, store) {
                 autoApproved: approvals.approved,
                 autoDelegated: approvals.delegated,
                 autoSeen: approvals.seen,
+                statusEvents: diagnostics.statusEvents,
+                statusSamples: [...diagnostics.statusSamples],
+                eventTypes: Object.fromEntries(diagnostics.eventTypes),
+                notes: [...diagnostics.notes],
             };
         },
         async saveSettings(patch = {}) {

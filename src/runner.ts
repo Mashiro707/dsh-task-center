@@ -81,7 +81,15 @@ export interface TaskRunner {
   /** @returns {Promise<RunnerSettings>} the persisted settings. */
   settings(): Promise<RunnerSettings>
   /** @returns {{autoApproved: number, autoDelegated: number}} approval counters since this host started. */
-  stats(): { autoApproved: number; autoDelegated: number }
+  stats(): {
+    autoApproved: number
+    autoDelegated: number
+    autoSeen: number
+    statusEvents: number
+    statusSamples: string[]
+    eventTypes: Record<string, number>
+    notes: string[]
+  }
   /**
    * Merge a patch into the settings.
    * @param {Record<string, unknown>} patch - fields to change.
@@ -349,6 +357,21 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   const pendingCalls = new Map<string, { taskId: string; name: string; args: unknown }>()
   let settings: RunnerSettings | null = null
   const approvals = { approved: 0, delegated: 0, seen: 0 }
+  // Counted so a stuck "running" row can be explained from the outside: either
+  // the status event never arrives, or it arrives without the agent we need.
+  const diagnostics = {
+    statusEvents: 0,
+    statusSamples: [] as string[],
+    eventTypes: new Map<string, number>(),
+    notes: [] as string[],
+  }
+  /**
+   * Keep one short breadcrumb for the settings response.
+   * @param {string} line - what happened.
+   */
+  function note(line: string): void {
+    if (diagnostics.notes.length < 12) diagnostics.notes.push(line)
+  }
   let disposed = false
   let draining = false
 
@@ -429,7 +452,10 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     message: string | null,
     options: { retry?: boolean } = {},
   ): Promise<void> {
-    if (sessionToTask.get(sessionId) !== taskId) return
+    if (sessionToTask.get(sessionId) !== taskId) {
+      note(`settle ${taskId}: 会话已不在本 runner 名下`)
+      return
+    }
     sessionToTask.delete(sessionId)
     taskToSession.delete(taskId)
     stopping.delete(taskId)
@@ -449,7 +475,10 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       const board = await store.list()
       const task = board.tasks.find(entry => entry.id === taskId)
       const run = task?.run ?? null
-      if (task === undefined || run === null || run.sessionId !== sessionId) return
+      if (task === undefined || run === null || run.sessionId !== sessionId) {
+        note(`settle ${taskId}: 任务行已被替换（${run?.sessionId ?? 'null'}）`)
+        return
+      }
       attempts = run.attempts
       retryable = options.retry === true && message !== null
       await store.update({
@@ -784,7 +813,13 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   }
 
   ctx.on('agent/status', (payload: { agent: HostAgent; status: string }) => {
-    const taskId = sessionToTask.get(payload.agent.id)
+    diagnostics.statusEvents += 1
+    if (diagnostics.statusEvents <= 6) {
+      diagnostics.statusSamples.push(
+        `${typeof payload?.agent?.id === 'string' ? payload.agent.id : 'no-agent'}:${String(payload?.status)}`,
+      )
+    }
+    const taskId = sessionToTask.get(payload?.agent?.id ?? '')
     if (taskId === undefined || payload.status === 'running') return
     void settle(taskId, payload.agent.id, 'done', null)
   })
@@ -804,6 +839,11 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   // Remember what each call asked for: the approval request carries only the
   // call id, so the arguments are read back from the session log.
   ctx.on('session/event', (session: HostSession, event: HostSessionEvent) => {
+    if (diagnostics.eventTypes.size < 64) {
+      const key = String(event?.type ?? '?')
+      diagnostics.eventTypes.set(key, (diagnostics.eventTypes.get(key) ?? 0) + 1)
+    }
+    if (event.type === 'turn/end') note(`turn/end ${session.id}`)
     if (event.type !== 'tool/call') return
     const data = (event.data ?? {}) as HostToolCallEvent['data']
     const callId = typeof data?.callId === 'string' ? data.callId : ''
@@ -902,6 +942,10 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         autoApproved: approvals.approved,
         autoDelegated: approvals.delegated,
         autoSeen: approvals.seen,
+        statusEvents: diagnostics.statusEvents,
+        statusSamples: [...diagnostics.statusSamples],
+        eventTypes: Object.fromEntries(diagnostics.eventTypes),
+        notes: [...diagnostics.notes],
       }
     },
 
