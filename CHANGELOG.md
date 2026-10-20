@@ -27,4 +27,4 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Styles are injected as a `data-plugin` style tag instead of the dynamic-only
   `styles` builtin.
 
-[1.0.0]: https://github.com/mashiro707/dsh-task-center/releases/tag/v1.0.0
+[1.0.0]: https://github.com/Mashiro707/dsh-task-center/releases/tag/v1.0.0

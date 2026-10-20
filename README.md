@@ -27,7 +27,7 @@
 **方式 A（推荐，交给 agent）**
 
 ```bash
-git clone https://github.com/mashiro707/dsh-task-center.git
+git clone https://github.com/Mashiro707/dsh-task-center.git
 ```
 
 然后在 DSH 里对 agent 说：

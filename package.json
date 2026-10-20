@@ -15,13 +15,13 @@
     "kanban",
     "web-ui"
   ],
-  "homepage": "https://github.com/mashiro707/dsh-task-center#readme",
+  "homepage": "https://github.com/Mashiro707/dsh-task-center#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mashiro707/dsh-task-center.git"
+    "url": "git+https://github.com/Mashiro707/dsh-task-center.git"
   },
   "bugs": {
-    "url": "https://github.com/mashiro707/dsh-task-center/issues"
+    "url": "https://github.com/Mashiro707/dsh-task-center/issues"
   },
   "author": "Mashiro",
   "license": "Apache-2.0",
