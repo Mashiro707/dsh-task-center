@@ -80,6 +80,22 @@ window.__ModuleLoader__.load({
                 noticeCleared: '回收站已清空',
                 untitled: '（无标题）',
                 done: '完成',
+                run: '开跑',
+                running: '运行中',
+                cancelRun: '停止',
+                runFailed: '上次运行失败',
+                runDone: '跑过一次',
+                autoRun: '自动开跑',
+                autoRunOn: '自动：开',
+                autoRunOff: '自动：关',
+                autoRunHint: '任务进入「进行中」时自动拉起一个智能体',
+                'field.cwd': '工作目录',
+                cwdPlaceholder: '绝对路径，例如 D:\\code\\my-project',
+                cwdHint: '开跑时智能体就在这个目录里工作',
+                noCwd: '先设置工作目录，再开跑',
+                noticeRun: '已拉起智能体',
+                noticeCanceled: '已停止',
+                noticeSettings: '设置已保存',
             },
             en: {
                 nav: 'Task Center',
@@ -147,6 +163,22 @@ window.__ModuleLoader__.load({
                 noticeCleared: 'Bin emptied',
                 untitled: '(untitled)',
                 done: 'Done',
+                run: 'Run',
+                running: 'Running',
+                cancelRun: 'Stop',
+                runFailed: 'Last run failed',
+                runDone: 'Ran once',
+                autoRun: 'Auto-run',
+                autoRunOn: 'Auto: on',
+                autoRunOff: 'Auto: off',
+                autoRunHint: 'Start an agent by itself when a task moves to Doing',
+                'field.cwd': 'Working directory',
+                cwdPlaceholder: 'Absolute path, for example D:\\code\\my-project',
+                cwdHint: 'The agent works in this directory when the task runs',
+                noCwd: 'Set a working directory before running',
+                noticeRun: 'Agent started',
+                noticeCanceled: 'Stopped',
+                noticeSettings: 'Settings saved',
             },
         };
         let fallbackT = (key) => (DICT.zh[key] === undefined ? key : DICT.zh[key]);
@@ -193,6 +225,15 @@ window.__ModuleLoader__.load({
             const a = new Date(from + 'T00:00:00').getTime();
             const b = new Date(to + 'T00:00:00').getTime();
             return Math.round((b - a) / 86400000);
+        }
+        /**
+         * @param {number} startedAt - when the run started.
+         * @returns {string} compact elapsed time for the running pill.
+         */
+        function elapsedLabel(startedAt) {
+            const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+            const minutes = Math.floor(seconds / 60);
+            return minutes < 1 ? seconds + 's' : minutes + 'm';
         }
         function dueLabel(due, t) {
             const today = todayIso();
@@ -254,6 +295,12 @@ window.__ModuleLoader__.load({
                 strokeLinecap: 'round',
                 strokeLinejoin: 'round',
             }));
+        }
+        function PlayIcon() {
+            return h('svg', { viewBox: '0 0 24 24', width: 11, height: 11, 'aria-hidden': true, className: 'tc-play-icon' }, h('path', { d: 'M8 5.4l11 6.6-11 6.6z', fill: 'currentColor' }));
+        }
+        function StopIcon() {
+            return h('svg', { viewBox: '0 0 24 24', width: 10, height: 10, 'aria-hidden': true, className: 'tc-stop-icon' }, h('rect', { x: 6, y: 6, width: 12, height: 12, rx: 2.2, fill: 'currentColor' }));
         }
         function PanelIcon(props) {
             const size = typeof props.size === 'number' && props.size > 0 ? props.size : 20;
@@ -333,6 +380,10 @@ window.__ModuleLoader__.load({
             const subtasks = props.subtasks;
             const t = props.t;
             const finished = subtasks.filter((child) => child.status === 'done').length;
+            const run = task.run === null || task.run === undefined ? null : task.run;
+            const running = run !== null && run.status === 'running';
+            const failed = run !== null && run.status === 'failed';
+            const canRun = !running && task.status !== 'done';
             const hasMeta = task.due !== null ||
                 task.tags.length > 0 ||
                 subtasks.length > 0 ||
@@ -380,7 +431,29 @@ window.__ModuleLoader__.load({
                     event.stopPropagation();
                     props.onToggle(task);
                 },
-            }, task.status === 'done' ? h(CheckMark, { size: 11 }) : null), h('span', { className: 'tc-card-title' }, task.title)), hasMeta ? h('div', { className: 'tc-card-meta' }, meta) : null);
+            }, task.status === 'done' ? h(CheckMark, { size: 11 }) : null), h('span', { className: 'tc-card-title' }, task.title), running
+                ? h('button', {
+                    type: 'button',
+                    className: 'tc-runpill',
+                    title: t('cancelRun'),
+                    'aria-label': t('cancelRun'),
+                    onClick: (event) => {
+                        event.stopPropagation();
+                        props.onCancelRun(task.id);
+                    },
+                }, h('span', { className: 'tc-run-dot', 'aria-hidden': true }), h('span', { className: 'tc-run-time' }, elapsedLabel(run.startedAt)), h(StopIcon))
+                : canRun
+                    ? h('button', {
+                        type: 'button',
+                        className: 'tc-runbtn' + (failed ? ' tc-runbtn-failed' : ''),
+                        title: failed && run.message !== null ? t('runFailed') + '：' + run.message : t('run'),
+                        'aria-label': t('run'),
+                        onClick: (event) => {
+                            event.stopPropagation();
+                            props.onRun(task.id);
+                        },
+                    }, h(PlayIcon))
+                    : null), hasMeta ? h('div', { className: 'tc-card-meta' }, meta) : null);
         }
         function BoardColumn(props) {
             const t = props.t;
@@ -421,6 +494,8 @@ window.__ModuleLoader__.load({
                     dragging: props.dragId === task.id,
                     onOpen: props.onOpen,
                     onToggle: props.onToggle,
+                    onRun: props.onRun,
+                    onCancelRun: props.onCancelRun,
                     onDragStart: props.onDragStart,
                     onDragEnd: props.onDragEnd,
                 }))));
@@ -435,6 +510,7 @@ window.__ModuleLoader__.load({
                 priority: task.priority,
                 due: task.due === null ? '' : task.due,
                 tags: task.tags.join(', '),
+                cwd: task.cwd === null || task.cwd === undefined ? '' : task.cwd,
             }));
             const [subDraft, setSubDraft] = useState('');
             const [saveState, setSaveState] = useState('idle');
@@ -478,7 +554,7 @@ window.__ModuleLoader__.load({
             const stage = (patch) => {
                 setForm((previous) => {
                     const next = Object.assign({}, previous, patch);
-                    const payload = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags) };
+                    const payload = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), cwd: next.cwd.trim() === '' ? null : next.cwd.trim() };
                     if (next.title.trim() !== '')
                         payload.title = next.title.trim();
                     pendingRef.current = payload;
@@ -547,7 +623,13 @@ window.__ModuleLoader__.load({
                 className: 'tc-input',
                 value: form.due,
                 onChange: (event) => stage({ due: event.target.value }),
-            })))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupContent')), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.tags')), h('input', {
+            }))), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.cwd')), h('input', {
+                className: 'tc-input tc-path',
+                value: form.cwd,
+                placeholder: t('cwdPlaceholder'),
+                onChange: (event) => stage({ cwd: event.target.value }),
+                onBlur: flush,
+            }), h('span', { className: 'tc-fieldhint' }, t('cwdHint')))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupContent')), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.tags')), h('input', {
                 className: 'tc-input',
                 value: form.tags,
                 placeholder: t('tagsPlaceholder'),
@@ -651,6 +733,7 @@ window.__ModuleLoader__.load({
             const [notice, setNotice] = useState(null);
             const [dragId, setDragId] = useState('');
             const [dropZone, setDropZone] = useState('');
+            const [runner, setRunner] = useState(null);
             const addRef = React.useRef(null);
             const refresh = React.useCallback(async () => {
                 try {
@@ -658,6 +741,12 @@ window.__ModuleLoader__.load({
                     setBoard(value);
                     setPhase('ready');
                     setFailure('');
+                    try {
+                        setRunner(await call('settings', {}));
+                    }
+                    catch (error) {
+                        // The board still works without the runner settings.
+                    }
                 }
                 catch (error) {
                     setPhase('error');
@@ -789,6 +878,34 @@ window.__ModuleLoader__.load({
                 if (addRef.current !== null)
                     addRef.current.focus();
             };
+            /** Open the drawer instead of running a task that has no directory yet. */
+            const startRun = async (id) => {
+                const task = tasks.find((entry) => entry.id === id) || null;
+                if (task !== null && (task.cwd === null || task.cwd === undefined || task.cwd === '')) {
+                    setOpenId(id);
+                    setNotice({ kind: 'error', text: t('noCwd') });
+                    return;
+                }
+                const ok = await mutate('run', { id });
+                if (ok)
+                    setNotice({ kind: 'ok', text: t('noticeRun') });
+            };
+            const stopRun = async (id) => {
+                const ok = await mutate('cancelRun', { id });
+                if (ok)
+                    setNotice({ kind: 'ok', text: t('noticeCanceled') });
+            };
+            const toggleAutoRun = async () => {
+                const next = !(runner !== null && runner.autoRun === true);
+                try {
+                    const value = await call('saveSettings', { autoRun: next });
+                    setRunner(Object.assign({}, runner === null ? {} : runner, value));
+                    setNotice({ kind: 'ok', text: t('noticeSettings') });
+                }
+                catch (error) {
+                    setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) });
+                }
+            };
             if (phase === 'loading') {
                 return h('div', { className: 'tc-root' }, h('div', { className: 'tc-center' }, h('p', { className: 'tc-hint' }, t('title') + '\u2026')));
             }
@@ -845,6 +962,8 @@ window.__ModuleLoader__.load({
                         onAdd: focusAdd,
                         onOpen: setOpenId,
                         onToggle: toggleTask,
+                        onRun: startRun,
+                        onCancelRun: stopRun,
                         onDragStart: setDragId,
                         onDragEnd: () => {
                             setDragId('');
@@ -888,7 +1007,14 @@ window.__ModuleLoader__.load({
                     value: tag,
                     'aria-label': t('allTags'),
                     onChange: (event) => setTag(event.target.value),
-                }, h('option', { value: '' }, t('allTags')), tags.map((name) => h('option', { key: name, value: name }, name)))), banner.length === 0 ? null : h('div', { className: 'tc-banner' }, banner)), h('div', { className: 'tc-body' }, body), openTask === null
+                }, h('option', { value: '' }, t('allTags')), tags.map((name) => h('option', { key: name, value: name }, name))), h('button', {
+                type: 'button',
+                className: 'tc-toggle' + (runner !== null && runner.autoRun === true ? ' tc-toggle-on' : ''),
+                title: t('autoRunHint'),
+                'aria-pressed': runner !== null && runner.autoRun === true,
+                disabled: runner !== null && runner.available === false,
+                onClick: () => void toggleAutoRun(),
+            }, h('span', { className: 'tc-toggle-dot', 'aria-hidden': true }), t(runner !== null && runner.autoRun === true ? 'autoRunOn' : 'autoRunOff'))), banner.length === 0 ? null : h('div', { className: 'tc-banner' }, banner)), h('div', { className: 'tc-body' }, body), openTask === null
                 ? null
                 : h('div', {
                     className: 'tc-scrim',
@@ -970,6 +1096,14 @@ window.__ModuleLoader__.load({
 .tc-btn-danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,var(--dsw-alias-border-l1))}
 .tc-btn-danger:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);border-color:var(--dsw-alias-state-error-primary)}
 
+.tc-toggle{display:inline-flex;align-items:center;gap:6px;appearance:none;font:inherit;font-size:12px;line-height:1.4;padding:5px 10px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;transition:color .12s ease,border-color .12s ease,background .12s ease}
+.tc-toggle:hover{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary)}
+.tc-toggle:disabled{opacity:.5;cursor:not-allowed}
+.tc-toggle-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-state-idle-primary)}
+.tc-toggle-on{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent)}
+.tc-toggle-on:hover{color:var(--dsw-alias-state-success-primary)}
+.tc-toggle-on .tc-toggle-dot{background:var(--dsw-alias-state-success-primary)}
+
 /* ---------------------------------------------------------------- banner */
 .tc-banner{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px}
 .tc-pill{font-size:12px;line-height:1.4;padding:2px 9px;border-radius:999px;border:1px solid transparent;font-variant-numeric:tabular-nums}
@@ -1008,6 +1142,17 @@ window.__ModuleLoader__.load({
 .tc-card-top{display:flex;align-items:flex-start;gap:7px}
 .tc-card-title{font-size:13px;line-height:1.45;word-break:break-word;min-width:0}
 .tc-card-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-left:22px}
+
+.tc-runbtn{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;appearance:none;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;transition:opacity .12s ease,color .12s ease,border-color .12s ease,background .12s ease}
+.tc-card:hover .tc-runbtn,.tc-card:focus-within .tc-runbtn,.tc-runbtn:focus-visible{opacity:1}
+.tc-runbtn:hover{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-base)}
+.tc-runbtn-failed{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 42%,var(--dsw-alias-border-l1));opacity:1}
+.tc-runpill{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:1px 6px 1px 7px;appearance:none;border-radius:999px;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 36%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);color:var(--dsw-alias-brand-primary);font:inherit;font-size:12px;line-height:1.6;cursor:pointer;font-variant-numeric:tabular-nums;transition:background .12s ease}
+.tc-runpill:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 20%,transparent)}
+.tc-run-dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary);animation:tc-pulse 1.4s ease-in-out infinite}
+.tc-run-time{min-width:17px;text-align:right}
+.tc-play-icon,.tc-stop-icon{display:block}
+@keyframes tc-pulse{0%,100%{opacity:1}50%{opacity:.2}}
 
 .tc-check{flex:0 0 auto;width:15px;height:15px;margin-top:2px;display:inline-flex;align-items:center;justify-content:center;appearance:none;padding:0;border-radius:50%;border:1.5px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-bg-base);cursor:pointer;transition:border-color .12s ease,background .12s ease}
 .tc-check:hover{border-color:var(--dsw-alias-brand-primary)}
@@ -1071,6 +1216,8 @@ window.__ModuleLoader__.load({
 .tc-field-row{display:flex;gap:10px}
 .tc-field-half{flex:1 1 0;min-width:0}
 .tc-label{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary)}
+.tc-fieldhint{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);opacity:.8}
+.tc-path{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
 .tc-textarea{resize:vertical;min-height:72px;font-family:inherit;line-height:1.55;font-size:13px}
 .tc-seg{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1)}
 .tc-seg-btn{flex:1 1 0;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:1.4;padding:5px 2px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:color .12s ease,background .12s ease}

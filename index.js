@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createRunner } from './runner.js';
 /** Host services this plugin needs before `apply` runs. */
 export const inject = ['webServer', 'tools'];
 /** Route prefix owned by this plugin. */
@@ -186,6 +187,40 @@ function cleanTags(value) {
  * @param {Record<string, unknown> | null} raw - one stored record.
  * @returns {TaskRecord | null} the normalized record or null.
  */
+/**
+ * Rebuild one run row from disk.
+ * @param {unknown} raw - stored value.
+ * @returns {TaskRun | null} the normalized run, or null when absent.
+ */
+function normalizeRun(raw) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
+        return null;
+    const source = raw;
+    const status = source.status === 'running' || source.status === 'done' || source.status === 'failed'
+        ? source.status
+        : 'failed';
+    return {
+        sessionId: typeof source.sessionId === 'string' && source.sessionId !== '' ? source.sessionId : null,
+        status,
+        startedAt: Number.isFinite(source.startedAt) ? source.startedAt : Date.now(),
+        endedAt: Number.isFinite(source.endedAt) ? source.endedAt : null,
+        message: typeof source.message === 'string' && source.message !== '' ? source.message : null,
+    };
+}
+/**
+ * @param {unknown} raw - stored value.
+ * @returns {string | null} an absolute-looking path, or null.
+ */
+function cleanCwd(value) {
+    if (typeof value !== 'string')
+        return null;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+}
+/**
+ * @param {Record<string, unknown> | null} raw - one row from disk.
+ * @returns {TaskRecord | null} the normalized row.
+ */
 function normalizeRecord(raw) {
     if (raw === null || typeof raw !== 'object')
         return null;
@@ -205,6 +240,8 @@ function normalizeRecord(raw) {
         priority,
         due,
         tags: Array.isArray(raw.tags) ? raw.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '') : [],
+        cwd: cleanCwd(raw.cwd),
+        run: normalizeRun(raw.run),
         parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
         createdAt,
         updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
@@ -400,6 +437,8 @@ export function createTaskStore(options = {}) {
                     priority: input.priority === undefined ? 'normal' : cleanPriority(input.priority),
                     due: cleanDue(input.due),
                     tags: cleanTags(input.tags),
+                    cwd: cleanCwd(input.cwd),
+                    run: null,
                     parentId,
                     createdAt: now,
                     updatedAt: now,
@@ -429,6 +468,10 @@ export function createTaskStore(options = {}) {
                     record.due = cleanDue(input.due);
                 if (input.tags !== undefined)
                     record.tags = cleanTags(input.tags);
+                if (input.cwd !== undefined)
+                    record.cwd = cleanCwd(input.cwd);
+                if (input.run !== undefined)
+                    record.run = normalizeRun(input.run);
                 if (input.status !== undefined) {
                     const status = cleanStatus(input.status);
                     if (status === 'done' && record.status !== 'done')
@@ -726,20 +769,55 @@ function publishTools(ctx, store) {
     };
 }
 /**
- * Mount the plugin: one HTTP route for the panel, four tools for the agent.
+ * @param {Record<string, unknown>} input - a request body naming one task.
+ * @returns {string} the task id.
+ */
+function requireId(input) {
+    const id = typeof input.id === 'string' ? input.id.trim() : '';
+    if (id === '')
+        throw storeError('bad-request', '缺少任务 id。');
+    return id;
+}
+/**
+ * Mount the plugin: one HTTP route for the panel, four tools for the agent, and
+ * the automatic runner behind both.
  * @param {HostContext} ctx - the host Cordis context.
  * @returns {void}
  */
 export function apply(ctx) {
     const store = createTaskStore();
+    const runner = createRunner(ctx, store);
+    /** Every mutation the panel or a tool makes feeds the auto-run gate. */
+    const watched = {
+        ...store,
+        create: async (input) => {
+            const record = await store.create(input);
+            runner.onTaskChanged(record);
+            return record;
+        },
+        update: async (input) => {
+            const record = await store.update(input);
+            runner.onTaskChanged(record);
+            return record;
+        },
+    };
     const handlers = {
-        list: () => store.list(),
-        create: input => store.create(input),
-        update: input => store.update(input),
-        remove: input => store.remove(input),
-        restore: input => store.restore(input),
-        purge: input => store.purge(input),
-        emptyTrash: () => store.emptyTrash(),
+        list: () => watched.list(),
+        create: input => watched.create(input),
+        update: input => watched.update(input),
+        remove: input => watched.remove(input),
+        // The panel has always called this `delete`; keep both spellings working.
+        delete: input => watched.remove(input),
+        restore: input => watched.restore(input),
+        purge: input => watched.purge(input),
+        emptyTrash: () => watched.emptyTrash(),
+        run: input => runner.start(requireId(input)),
+        cancelRun: input => runner.cancel(requireId(input)),
+        settings: async () => ({
+            ...(await runner.settings()),
+            available: ctx.get('sessionController') !== undefined,
+        }),
+        saveSettings: input => runner.saveSettings(input),
     };
     /**
      * Dispatch one `/task-center/api/<method>` call.
@@ -784,11 +862,16 @@ export function apply(ctx) {
     ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: ROUTE, handler }), 'task-center: json api');
     ctx.effect(() => {
         try {
-            return publishTools(ctx, store);
+            return publishTools(ctx, watched);
         }
         catch (error) {
             ctx.logger?.warn?.(`[task-center] 工具注册失败：${error instanceof Error ? error.message : String(error)}`);
             return () => undefined;
         }
     }, 'task-center: agent tools');
+    ctx.effect(() => () => runner.dispose(), 'task-center: runner');
+    // No run can outlive the plugin, so any row still marked running is an orphan.
+    void runner.reconcile().catch((error) => {
+        ctx.logger?.warn?.(`[task-center] 中断运行清理失败：${error instanceof Error ? error.message : String(error)}`);
+    });
 }

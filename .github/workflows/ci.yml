@@ -30,4 +30,4 @@ jobs:
         run: npm test
 
       - name: Fail if committed artifacts are stale
-        run: git diff --exit-code -- index.js client.js
+        run: git diff --exit-code -- index.js runner.js client.js

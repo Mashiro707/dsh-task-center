@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-10-20
+
+### Added
+
+- Tasks can start an agent. A task with a working directory gets a ▶ on its card;
+  pressing it opens a DSH session in that directory, admits the task brief as one
+  user message, and moves the task to "doing".
+- A global auto-run switch (persisted in `settings.json`), a concurrency cap
+  (default 2, hard limit 4), and a permission preset (default `auto`).
+- Live run badge on cards with elapsed time, click to stop.
+- `cwd` and `run` fields on every task; runs interrupted by a restart are marked
+  "运行中断" on load instead of pretending to still be running.
+- Route actions: `run`, `cancelRun`, `settings`, `saveSettings`.
+
+### Fixed
+
+- Deleting a task from the panel called `/delete`, which the host never routed
+  (it only knew `remove`), so the button always failed. Both spellings work now.
+
 ## [1.0.0] - 2026-10-20
 
 ### Added
@@ -27,4 +46,5 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Styles are injected as a `data-plugin` style tag instead of the dynamic-only
   `styles` builtin.
 
+[1.1.0]: https://github.com/Mashiro707/dsh-task-center/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Mashiro707/dsh-task-center/releases/tag/v1.0.0

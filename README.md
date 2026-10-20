@@ -13,6 +13,7 @@
 - **子任务**：一层嵌套，父任务进回收站时整棵树一起走
 - **回收站**：软删除、按根任务恢复、彻底清除
 - **交互**：搜索、详情抽屉右滑入、`focus-visible` 焦点环、空状态占位
+- **自动开跑**：给任务指定工作目录后，点卡片上的 ▶ 让 DSH 里真起一个 agent 去做；也可以开全局自动开关
 - **主题**：只用 `--dsw-alias-*` 设计令牌，明暗主题自动跟随，无字面色
 
 ## 环境要求
@@ -55,6 +56,18 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 
 面板：四列拖拽不支持的场景用状态选择器改列；卡片点开是详情抽屉；顶部搜索框按标题、备注、标签过滤。
 
+### 让任务自己跑
+
+任务详情里填一个**工作目录**，卡片右上角就会浮出 ▶。点它，插件会在宿主里起一个 DSH 会话（agent），把任务简报作为一条用户消息投进去，任务同时进「进行中」；卡片上的徽章显示已跑时长，点它可停止。
+
+- **全局自动开关**（工具栏那个圆点按钮）：打开后，任何进入「进行中」且带目录的任务都会自动开跑
+- **并发上限**：默认 2，可在详情/设置里改，硬上限 4
+- **收尾**：agent 空闲即视为做完，任务留「进行中」等你验收；agent 报错则记 `failed`，原因写进 `run.message`
+- **中断恢复**：插件或宿主重启时，还在 `running` 的行会被标成「运行中断」，不会假装还在跑
+- **权限**：默认套用 `auto` 预设（逐次调用复核，最接近无人值守）；预设不存在时只记一条 warn，不阻断开跑
+
+任务多了两个字段：`cwd`（工作目录，可为空）与 `run`（`{sessionId, status: running|done|failed, startedAt, endedAt, message}`）。
+
 ### agent 工具
 
 | 工具 | 作用 | 主要参数 |
@@ -69,6 +82,14 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 ### HTTP API
 
 面板与宿主之间走 `POST /task-center/api/<action>`，JSON 请求体。路由只接受来自 loopback 且同源的请求。
+
+| action | 作用 |
+| --- | --- |
+| `list` / `create` / `update` / `remove` / `delete`（`remove` 的别名）/ `restore` / `purge` / `emptyTrash` | 任务 CRUD 与回收站 |
+| `run` / `cancelRun` | 起一个 agent / 停止它 |
+| `settings` / `saveSettings` | 读/写 `{autoRun, concurrency, preset}`，`settings` 另回 `available`（宿主有没有会话服务） |
+
+设置存放在任务文件旁边的 `settings.json`，同样走原子写入。
 
 ## 数据
 
@@ -89,11 +110,13 @@ npm test           # build + node --test
 
 ```
 src/index.ts            宿主半：Cordis 插件，JSON 存储 + HTTP 路由 + agent 工具
+src/runner.ts           宿主半：把任务变成一次 agent 运行（会话、投递、收尾）
 src/client.ts           浏览器半：React（无 JSX）面板
 src/types.d.ts          两端共享的领域模型
 src/host-globals.d.ts   仅宿主半可见的接口声明
 src/client-globals.d.ts 仅浏览器半可见的 require / __ModuleLoader__ 接口
-index.js, client.js     构建产物，勿手改
+index.js, runner.js     构建产物，勿手改
+client.js               同上
 ```
 
 ### 两条硬约束
@@ -109,6 +132,8 @@ index.js, client.js     构建产物，勿手改
 - **产物入库**：`index.js` / `client.js` 一起提交，clone 即用。代价是改源码后要重新构建，好处是安装形态和设备上的构建链无关。
 - **单文件 JSON 而非数据库**：任务量在几百条以内，单文件足够；原子 rename 换来的是零运维和可读的备份。
 - **只依赖 `node:` 内置模块**：运行时不引第三方包，`typescript` 与 `@types/node` 只在开发期存在。
+- **不 import `@deepseek-ai/*`**：从插件自己的真实路径解析这些包会失败（它们装在 profile 里）。所以起会话走 `ctx.get('sessionController')`，投递消息按 `{id, role:'user', content, source}` 手写等价结构，不依赖任何 DSH 包的运行时导出。
+- **结束时看事件，不看返回值**：`followup()` 只是入队，真正的完成信号是 `agent/status` 从 `running` 翻走，或 `agent/error`。
 
 ## 许可证
 

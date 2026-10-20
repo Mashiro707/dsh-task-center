@@ -64,6 +64,10 @@ test('every requested visual affordance is present', () => {
     ['list rows for trash', /\.tc-row\{/],
     ['focus ring', /:focus-visible\{outline:2px solid var\(--dsw-alias-brand-primary\)/],
     ['empty state', /\.tc-empty\{/],
+    ['run button on cards', /\.tc-runbtn\{/],
+    ['running pill', /\.tc-runpill\{[^}]*border-radius:999px/],
+    ['running pulse', /@keyframes tc-pulse\{/],
+    ['auto-run switch', /\.tc-toggle-on\{/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
 })
@@ -75,6 +79,15 @@ test('the markup feeds the stylesheet its state', () => {
   assert.match(source, /className: 'tc-searchwrap'/, 'search field needs its icon wrapper')
   assert.match(source, /className: 'tc-group'/, 'drawer fields need grouping')
   assert.match(source, /className: 'tc-scrim'/, 'drawer needs a dismissible scrim')
+})
+
+test('the panel can start and stop agent runs', () => {
+  assert.match(source, /mutate\('run',/, 'cards must call the run endpoint')
+  assert.match(source, /mutate\('cancelRun',/, 'stop button must call the cancel endpoint')
+  assert.match(source, /call\('saveSettings',/, 'auto-run switch must persist through saveSettings')
+  assert.match(source, /t\('field\.cwd'\)/, 'the drawer needs a working-directory field')
+  assert.match(source, /className: 'tc-toggle'/, 'the toolbar needs the auto-run switch')
+  assert.match(source, /t\('noCwd'\)/, 'a task without a directory must explain itself')
 })
 
 test('loading the client half really appends one package-owned stylesheet', () => {

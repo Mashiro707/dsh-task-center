@@ -14,6 +14,20 @@ type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done'
 /** Priority ladder, ascending urgency. */
 type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
 
+/** Lifecycle of one automatic agent run attached to a task. */
+type TaskRunStatus = 'running' | 'done' | 'failed'
+
+/** One automatic agent run: which session ran the task, and how it ended. */
+interface TaskRun {
+  /** Session the plugin created for this run, or null before admission. */
+  sessionId: string | null
+  status: TaskRunStatus
+  startedAt: number
+  endedAt: number | null
+  /** Failure text, or the closing note; null while running or on success. */
+  message: string | null
+}
+
 /** One normalized task row, exactly as it is stored on disk. */
 interface TaskRecord {
   id: string
@@ -24,6 +38,10 @@ interface TaskRecord {
   /** `YYYY-MM-DD`, or null when the task has no deadline. */
   due: string | null
   tags: string[]
+  /** Absolute working directory an automatic run starts in; null until set. */
+  cwd: string | null
+  /** Latest automatic run, or null when the task was never run. */
+  run: TaskRun | null
   /** Parent task id; subtasks are exactly one level deep. */
   parentId: string | null
   createdAt: number
@@ -43,6 +61,7 @@ interface TaskCreateInput {
   due?: string | null
   tags?: string[]
   parentId?: string | null
+  cwd?: string | null
 }
 
 /** Fields accepted when updating a task; only what is present is applied. */
@@ -55,6 +74,9 @@ interface TaskUpdateInput {
   due?: string | null
   tags?: string[]
   parentId?: string | null
+  cwd?: string | null
+  /** Written by the runner only, never by a caller patching content. */
+  run?: TaskRun | null
 }
 
 /** One trashed tree as reported to the UI. */
