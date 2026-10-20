@@ -862,13 +862,18 @@ export function createRunner(ctx, store) {
     ctx.on('session/event', (session, event) => onSessionEvent(session, event), { global: true });
     // Answer approvals for this runner's own runs, but only while the call stays
     // inside the task's workspace. Everything else falls through to the user.
-    ctx.on('approval/request', (request, next) => {
-        const taskId = sessionToTask.get(request.agent?.id ?? '');
+    // Registered twice because the host routes this waterfall through an agent
+    // scope; whichever registration is in the chain answers first and the other
+    // is never reached.
+    function onApprovalRequest(request, next, scope) {
+        // Counted before any lookup: a rising `autoSeen` proves the request reached
+        // this plugin at all, which a silent panel cannot tell.
+        approvals.seen += 1;
+        const agentId = request?.agent?.id ?? '';
+        note(`approval ${scope} agent=${agentId === '' ? 'none' : agentId} tool=${request?.toolName ?? '?'}`);
+        const taskId = sessionToTask.get(agentId);
         if (taskId === undefined)
             return next();
-        // Counted even when we refuse to decide: a rising `autoSeen` proves the
-        // gate is reached at all, which is what a silent panel cannot tell us.
-        approvals.seen += 1;
         return (async () => {
             try {
                 const board = await store.list();
@@ -897,7 +902,11 @@ export function createRunner(ctx, store) {
                 return await next();
             }
         })();
-    });
+    }
+    // Registered only once, and globally: the live host never delivered this
+    // waterfall to a plain listener, and a second registration would let the two
+    // copies answer the same request.
+    ctx.on('approval/request', (request, next) => onApprovalRequest(request, next, 'global'), { global: true });
     return {
         start,
         async cancel(taskId) {

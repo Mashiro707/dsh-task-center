@@ -880,7 +880,12 @@ test('an approval for a session this runner does not own falls through', async (
     )
     assert.deepEqual(results, ['unavailable'])
     assert.equal(asked, true)
-    assert.equal(runner.stats().autoSeen, 0, 'a foreign session must not be counted')
+    const stats = runner.stats()
+    // `autoSeen` counts what reached the gate, foreign sessions included: that
+    // is the number that tells us whether the waterfall is wired up at all.
+    assert.equal(stats.autoSeen, 1, 'the request is counted as seen')
+    assert.equal(stats.autoApproved, 0, 'a foreign session is never approved')
+    assert.equal(stats.autoDelegated, 0, 'a foreign session is not ours to delegate')
   } finally {
     await dispose()
   }
