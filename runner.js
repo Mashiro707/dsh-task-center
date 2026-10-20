@@ -625,6 +625,34 @@ export function createRunner(ctx, store) {
      * @param {TaskRecord} record - the row as it was just written.
      * @returns {void}
      */
+    /**
+     * Start the tasks that were already waiting when auto-run was switched on.
+     *
+     * Only tasks that never ran are picked up: a task that already has a run was
+     * either finished by its agent or started by hand, and re-running it on a
+     * settings change would surprise the user.
+     * @returns {Promise<void>} resolves once every candidate was offered to the queue.
+     */
+    async function sweepBoard() {
+        if (disposed)
+            return;
+        const config = await readSettings();
+        if (!config.autoRun)
+            return;
+        const board = await store.list();
+        for (const task of board.tasks) {
+            if (task.deletedAt !== null || task.status !== 'doing' || task.run !== null)
+                continue;
+            if ((task.workspaceId ?? '').trim() === '' && (task.cwd ?? '').trim() === '')
+                continue;
+            try {
+                await start(task.id);
+            }
+            catch (error) {
+                ctx.logger?.warn?.(`[task-center] 补跑失败：${describe(error)}`);
+            }
+        }
+    }
     function onTaskChanged(record) {
         if (disposed)
             return;
@@ -781,6 +809,8 @@ export function createRunner(ctx, store) {
             const nowRoom = taskToSession.size < next.concurrency;
             if (nowRoom && (!wasIdle || next.concurrency > current.concurrency))
                 void drain();
+            if (!current.autoRun && next.autoRun)
+                void sweepBoard();
             return next;
         },
         onTaskChanged,

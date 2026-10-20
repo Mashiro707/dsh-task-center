@@ -19,6 +19,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `settings` action also reports `autoApproved` / `autoDelegated`, the
   number of approvals this host has answered or handed back since it started.
 
+### Fixed
+
+- Turning auto-run on now sweeps the tasks that were already waiting in
+  `doing`, instead of only reacting to later changes. Tasks that already ran
+  once are left alone so nothing starts twice.
+
 ## [1.3.0] - 2026-10-20
 
 ### Added

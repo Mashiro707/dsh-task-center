@@ -825,3 +825,29 @@ test('an approval for a session this runner does not own falls through', async (
     await dispose()
   }
 })
+
+test('turning auto-run on picks up the tasks already waiting', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const waiting = await store.create({ title: '早就躺在这', status: 'doing', workspaceId: 'ws-1', workspacePath: 'C:/work/app' })
+    const finished = await store.create({ title: '跑过了', status: 'doing', workspaceId: 'ws-1', workspacePath: 'C:/work/app' })
+    await store.update({
+      id: finished.id,
+      run: { sessionId: 'session-old', status: 'done', startedAt: 1, endedAt: 2, message: null, attempts: 1 },
+    })
+
+    assert.equal((await runner.settings()).autoRun, false)
+    assert.equal((await store.list()).tasks.find(task => task.id === waiting.id).run, null)
+
+    await runner.saveSettings({ autoRun: true })
+    await waitFor(async () => (await store.list()).tasks.find(task => task.id === waiting.id).run?.status === 'running')
+
+    const after = await store.list()
+    assert.equal(after.tasks.find(task => task.id === waiting.id).run.status, 'running', 'the waiting task starts')
+    assert.equal(after.tasks.find(task => task.id === finished.id).run.sessionId, 'session-old', 'a task that already ran is left alone')
+  } finally {
+    await dispose()
+  }
+})
