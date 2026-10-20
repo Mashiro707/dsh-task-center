@@ -978,15 +978,19 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     })()
   }
 
-  // Registered only once, and globally: the live host never delivered this
-  // waterfall to a plain listener, and a second registration would let the two
-  // copies answer the same request.
-  ctx.on(
-    'approval/request',
-    (request: HostApprovalRequest, next: () => Promise<HostApprovalOutcome>) =>
-      onApprovalRequest(request, next, 'global'),
-    { global: true },
-  )
+  // Registered once and as early as the host allows: live, this waterfall is
+  // answered by another listener before a plain subscriber ever runs, so the
+  // gate has to sit in front of it. `prepend` is the documented way to do that;
+  // if this host ignores the option the registration still works, just later.
+  const approvalListener = (request: HostApprovalRequest, next: () => Promise<HostApprovalOutcome>) =>
+    onApprovalRequest(request, next, 'global')
+  try {
+    ctx.on('approval/request', approvalListener, { global: true, prepend: true })
+    note('approval listener: global+prepend')
+  } catch (error) {
+    note(`approval listener: prepend 被拒（${describe(error)}），退回 global`)
+    ctx.on('approval/request', approvalListener, { global: true })
+  }
 
   return {
     start,

@@ -150,6 +150,6 @@ interface HostContext {
   on(
     event: string,
     listener: (...args: any[]) => unknown,
-    options?: { global?: boolean },
+    options?: { global?: boolean; prepend?: boolean },
   ): HostDisposer | void
 }
