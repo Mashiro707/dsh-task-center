@@ -38,6 +38,12 @@ interface TaskRecord {
   /** `YYYY-MM-DD`, or null when the task has no deadline. */
   due: string | null
   tags: string[]
+  /** Registered DSH Workspace this task belongs to; null on legacy rows. */
+  workspaceId: string | null
+  /** Absolute directory of that workspace, kept so the UI still renders without the registry. */
+  workspacePath: string | null
+  /** Permission preset for this task's runs; null means "follow the global setting". */
+  permission: string | null
   /** Absolute working directory an automatic run starts in; null until set. */
   cwd: string | null
   /** Latest automatic run, or null when the task was never run. */
@@ -61,6 +67,9 @@ interface TaskCreateInput {
   due?: string | null
   tags?: string[]
   parentId?: string | null
+  workspaceId?: string | null
+  workspacePath?: string | null
+  permission?: string | null
   cwd?: string | null
 }
 
@@ -74,6 +83,9 @@ interface TaskUpdateInput {
   due?: string | null
   tags?: string[]
   parentId?: string | null
+  workspaceId?: string | null
+  workspacePath?: string | null
+  permission?: string | null
   cwd?: string | null
   /** Written by the runner only, never by a caller patching content. */
   run?: TaskRun | null

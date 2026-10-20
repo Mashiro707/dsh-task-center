@@ -56,25 +56,34 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 
 面板：四列拖拽不支持的场景用状态选择器改列；卡片点开是详情抽屉；顶部搜索框按标题、备注、标签过滤。
 
+### 任务、工作区与权限
+
+每个任务属于一个 **DSH 工作区**（就是左侧会话列表里那种工作区，它有自己的目录）。任务跑起来时，插件用 `sessionController.create({ workspaceId })` 让宿主在该工作区里开会话，于是这个任务产生的所有 agent 都落在同一个目录下，会话也会出现在那个工作区里。
+
+- **选工作区**：新建任务时工具栏的「新建到」下拉决定它归谁；详情抽屉里可以改。下拉里的「登记新目录」输入一个已存在的绝对路径，就会在 DSH 里建一个工作区并选中它。
+- **权限**：详情抽屉的「权限」默认「跟随全局」，也就是用全局预设；选一个具体预设则**只影响这个任务拉起的 agent**，不改全局设置。
+- **没有工作区的老任务**：仍然可以填 `cwd` 兜底；两者都没有时拒绝开跑并提示。
+
 ### 让任务自己跑
 
-任务详情里填一个**工作目录**，卡片右上角就会浮出 ▶。点它，插件会在宿主里起一个 DSH 会话（agent），把任务简报作为一条用户消息投进去，任务同时进「进行中」；卡片上的徽章显示已跑时长，点它可停止。
+任务有了工作区（或老式的工作目录）后，卡片右上角就会浮出 ▶。点它，插件会起一个 DSH 会话，把任务简报作为一条用户消息投进去，任务同时进「进行中」；卡片上的徽章显示已跑时长，点它可停止。
 
-- **全局自动开关**（工具栏那个圆点按钮）：打开后，任何进入「进行中」且带目录的任务都会自动开跑
+- **全局自动开关**（工具栏那个圆点按钮）：打开后，任何进入「进行中」且能跑到目录的任务都会自动开跑
 - **并发上限**：默认 2，可在详情/设置里改，硬上限 4
 - **收尾**：agent 空闲即视为做完，任务留「进行中」等你验收；agent 报错则记 `failed`，原因写进 `run.message`
 - **中断恢复**：插件或宿主重启时，还在 `running` 的行会被标成「运行中断」，不会假装还在跑
-- **权限**：默认套用 `auto` 预设（逐次调用复核，最接近无人值守）；预设不存在时只记一条 warn，不阻断开跑
+- **权限回落**：任务没指定预设时用全局预设（默认 `auto`：逐次调用复核，最接近无人值守）；预设不存在时只记一条 warn，不阻断开跑
 
-任务多了两个字段：`cwd`（工作目录，可为空）与 `run`（`{sessionId, status: running|done|failed, startedAt, endedAt, message}`）。
+任务多了三个字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）与 `run`（`{sessionId, status: running|done|failed, startedAt, endedAt, message}`）。
 
 ### agent 工具
 
 | 工具 | 作用 | 主要参数 |
 | --- | --- | --- |
 | `task_list` | 列出任务（子任务挂在父任务下）与回收站 | `status` / `tag` / `query` / `include_trash` |
-| `task_create` | 新建任务 | `title`（必填）/ `notes` / `status` / `priority` / `due` / `tags` / `parent_id` |
-| `task_update` | 只改传入的字段 | `id`（必填）+ 同上各字段，`due`、`parent_id` 可传 `null` 清空 |
+| `task_workspaces` | 列出可选工作区（id、标题、目录） | — |
+| `task_create` | 新建任务 | `title`（必填）/ `notes` / `status` / `priority` / `due` / `tags` / `parent_id` / `workspace_id` / `permission` |
+| `task_update` | 只改传入的字段 | `id`（必填）+ 同上各字段，`due`、`parent_id`、`workspace_id`、`permission` 可传 `null` 清空 |
 | `task_delete` | 删除任务（默认进回收站） | `id`（必填）/ `permanent` |
 
 状态：`todo` `doing` `blocked` `done`；优先级：`low` `normal` `high` `urgent`。
@@ -87,6 +96,8 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 | --- | --- |
 | `list` / `create` / `update` / `remove` / `delete`（`remove` 的别名）/ `restore` / `purge` / `emptyTrash` | 任务 CRUD 与回收站；`remove` / `delete` 传 `permanent: true` 时直接抹掉，不进回收站 |
 | `run` / `cancelRun` | 起一个 agent / 停止它 |
+| `workspaces` / `createWorkspace` | 列出可选工作区 / 把某个绝对路径登记成工作区 |
+| `permissions` | 宿主提供的权限预设列表（`{options, defaultPreset, available}`） |
 | `settings` / `saveSettings` | 读/写 `{autoRun, concurrency, preset}`，`settings` 另回 `available`（宿主有没有会话服务） |
 
 设置存放在任务文件旁边的 `settings.json`，同样走原子写入。
@@ -134,6 +145,8 @@ client.js               同上
 - **只依赖 `node:` 内置模块**：运行时不引第三方包，`typescript` 与 `@types/node` 只在开发期存在。
 - **不 import `@deepseek-ai/*`**：从插件自己的真实路径解析这些包会失败（它们装在 profile 里）。所以起会话走 `ctx.get('sessionController')`，投递消息按 `{id, role:'user', content, source}` 手写等价结构，不依赖任何 DSH 包的运行时导出。
 - **结束时看事件，不看返回值**：`followup()` 只是入队，真正的完成信号是 `agent/status` 从 `running` 翻走，或 `agent/error`。
+- **工作区而不是裸目录**：`sessionController.create({ workspaceId })` 由宿主把目录、会话归属和工作区记录一起处理，插件不用自己拼 cwd；`cwd` 只作为没有工作区时的兼容兜底。
+- **权限是任务级覆盖**：预设通过 `permissionPresets.set(session, name)` 落在会话上，所以「这个任务用这套权限」不会污染全局设置。
 
 ## 许可证
 

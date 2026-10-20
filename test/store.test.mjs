@@ -73,6 +73,38 @@ test('update moves a task to done and stamps completedAt', async () => {
   }
 })
 
+test('a task keeps its workspace and permission across a reload', async () => {
+  const { dataFile, store, dispose } = await makeStore()
+  try {
+    const created = await store.create({
+      title: '带工作区',
+      workspaceId: 'ws-1',
+      workspacePath: 'C:/work/app',
+      permission: 'auto',
+    })
+    assert.equal(created.workspaceId, 'ws-1')
+    assert.equal(created.workspacePath, 'C:/work/app')
+    assert.equal(created.permission, 'auto')
+
+    const reopened = await createTaskStore({ dataFile }).list()
+    assert.equal(reopened.tasks[0].workspaceId, 'ws-1')
+    assert.equal(reopened.tasks[0].workspacePath, 'C:/work/app')
+    assert.equal(reopened.tasks[0].permission, 'auto')
+
+    const cleared = await store.update({ id: created.id, workspaceId: null, workspacePath: null, permission: null })
+    assert.equal(cleared.workspaceId, null)
+    assert.equal(cleared.workspacePath, null)
+    assert.equal(cleared.permission, null)
+
+    const plain = await store.create({ title: '无工作区' })
+    assert.equal(plain.workspaceId, null)
+    assert.equal(plain.workspacePath, null)
+    assert.equal(plain.permission, null)
+  } finally {
+    await dispose()
+  }
+})
+
 test('update and remove reject an unknown id', async () => {
   const { store, dispose } = await makeStore()
   try {

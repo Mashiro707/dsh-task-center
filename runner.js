@@ -69,6 +69,7 @@ export function createUserMessage(text) {
  */
 export function buildPrompt(task, cwd) {
     const tags = task.tags.length > 0 ? task.tags.join(' / ') : '无';
+    const workspace = (task.workspacePath ?? '').trim() === '' ? '' : `所属工作区：${task.workspacePath}\n`;
     return [
         '你是任务中心自动拉起的执行智能体。请把下面这个任务真正做完。',
         '',
@@ -77,6 +78,7 @@ export function buildPrompt(task, cwd) {
         `状态：${task.status}　优先级：${task.priority}　截止：${task.due ?? '未设置'}`,
         `标签：${tags}`,
         `工作目录：${cwd}`,
+        ...(workspace === '' ? [] : [workspace.trimEnd()]),
         '',
         '说明：',
         task.notes.trim() === '' ? '（无）' : task.notes.trim(),
@@ -242,25 +244,29 @@ export function createRunner(ctx, store) {
             throw runnerError('not-found', `找不到任务 ${taskId}。`);
         if (task.run !== null && task.run.status === 'running')
             throw runnerError('running', '这个任务已经在跑了。');
+        const workspaceId = (task.workspaceId ?? '').trim();
         const cwd = (task.cwd ?? '').trim();
-        if (cwd === '')
-            throw runnerError('cwd-missing', '先给这个任务设置工作目录，再让它开跑。');
+        if (workspaceId === '' && cwd === '') {
+            throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。');
+        }
         const config = await readSettings();
         if (taskToSession.size >= config.concurrency) {
             throw runnerError('busy', `同时最多跑 ${config.concurrency} 个任务，先等一个结束。`);
         }
-        const created = await controller.create({ cwd });
+        // Exactly one of the two: the Host rejects a request naming both.
+        const created = await controller.create(workspaceId === '' ? { cwd } : { workspaceId });
         const resolved = await controller.resolveAgent(created.sessionId);
         if (resolved.agent === undefined) {
             throw runnerError('unavailable', `会话 ${created.sessionId} 建好后拿不到智能体：${describe(resolved.error)}`);
         }
         const agent = resolved.agent;
-        installPreset(agent, config.preset);
+        const preset = (task.permission ?? '').trim();
+        installPreset(agent, preset === '' ? config.preset : preset);
         // Register before the prompt: the agent may flip to running immediately.
         sessionToTask.set(agent.id, task.id);
         taskToSession.set(task.id, agent.id);
         try {
-            agent.followup(createUserMessage(buildPrompt(task, cwd)));
+            agent.followup(createUserMessage(buildPrompt(task, workspaceId === '' ? cwd : task.workspacePath ?? cwd)));
         }
         catch (error) {
             sessionToTask.delete(agent.id);
@@ -308,7 +314,7 @@ export function createRunner(ctx, store) {
             const config = await readSettings();
             if (!config.autoRun)
                 return;
-            if ((record.cwd ?? '').trim() === '')
+            if ((record.workspaceId ?? '').trim() === '' && (record.cwd ?? '').trim() === '')
                 return;
             if (taskToSession.size >= config.concurrency) {
                 ctx.logger?.info?.(`[task-center] 并发已满，${record.id} 排队等下一次。`);

@@ -81,6 +81,15 @@ function storeError(code, message) {
     return error;
 }
 /**
+ * @param {unknown} error - anything thrown.
+ * @returns {string} a short sentence safe to show a human.
+ */
+function describeError(error) {
+    if (error instanceof Error)
+        return error.message;
+    return String(error);
+}
+/**
  * The data file this install writes.
  * @returns {string} absolute path.
  */
@@ -218,6 +227,16 @@ function cleanCwd(value) {
     return trimmed === '' ? null : trimmed;
 }
 /**
+ * @param {unknown} value - stored value.
+ * @returns {string | null} a trimmed non-empty string, or null.
+ */
+function cleanText(value) {
+    if (typeof value !== 'string')
+        return null;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+}
+/**
  * @param {Record<string, unknown> | null} raw - one row from disk.
  * @returns {TaskRecord | null} the normalized row.
  */
@@ -240,6 +259,9 @@ function normalizeRecord(raw) {
         priority,
         due,
         tags: Array.isArray(raw.tags) ? raw.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '') : [],
+        workspaceId: cleanText(raw.workspaceId),
+        workspacePath: cleanCwd(raw.workspacePath),
+        permission: cleanText(raw.permission),
         cwd: cleanCwd(raw.cwd),
         run: normalizeRun(raw.run),
         parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
@@ -437,6 +459,9 @@ export function createTaskStore(options = {}) {
                     priority: input.priority === undefined ? 'normal' : cleanPriority(input.priority),
                     due: cleanDue(input.due),
                     tags: cleanTags(input.tags),
+                    workspaceId: cleanText(input.workspaceId),
+                    workspacePath: cleanCwd(input.workspacePath),
+                    permission: cleanText(input.permission),
                     cwd: cleanCwd(input.cwd),
                     run: null,
                     parentId,
@@ -468,6 +493,12 @@ export function createTaskStore(options = {}) {
                     record.due = cleanDue(input.due);
                 if (input.tags !== undefined)
                     record.tags = cleanTags(input.tags);
+                if (input.workspaceId !== undefined)
+                    record.workspaceId = cleanText(input.workspaceId);
+                if (input.workspacePath !== undefined)
+                    record.workspacePath = cleanCwd(input.workspacePath);
+                if (input.permission !== undefined)
+                    record.permission = cleanText(input.permission);
                 if (input.cwd !== undefined)
                     record.cwd = cleanCwd(input.cwd);
                 if (input.run !== undefined)
@@ -685,6 +716,21 @@ function publishTools(ctx, store) {
         },
     });
     add({
+        name: 'task_workspaces',
+        description: 'List the DSH workspaces a task can belong to, with the directory each one owns. Pass one id as workspace_id when creating a task.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+        output: JSON_OUTPUT,
+        execute: async () => {
+            const registry = service(ctx, 'workspaceRegistry');
+            if (registry === undefined)
+                return { workspaces: [], available: false };
+            return {
+                workspaces: registry.list().map(workspace => ({ id: workspace.id, title: workspace.title, path: workspace.path })),
+                available: true,
+            };
+        },
+    });
+    add({
         name: 'task_create',
         description: 'Create one task in the user task center. Pass parent_id to add it as a subtask of an existing top-level task (subtasks are one level deep).',
         parameters: {
@@ -697,6 +743,8 @@ function publishTools(ctx, store) {
                 due: { type: 'string', description: 'Due date as YYYY-MM-DD.' },
                 tags: { type: 'array', items: { type: 'string' }, description: 'At most 20 short tags.' },
                 parent_id: { type: 'string', description: 'Id of the top-level task to nest under.' },
+                workspace_id: { type: 'string', description: 'Id of the DSH workspace this task belongs to. Use task_workspaces to see the choices.' },
+                permission: { type: 'string', description: 'Permission preset name for this task\'s runs; omit to follow the global setting.' },
             },
             required: ['title'],
             additionalProperties: false,
@@ -710,6 +758,8 @@ function publishTools(ctx, store) {
             due: args?.due,
             tags: args?.tags,
             parentId: args?.parent_id,
+            workspaceId: args?.workspace_id,
+            permission: args?.permission,
         }),
     });
     add({
@@ -726,6 +776,8 @@ function publishTools(ctx, store) {
                 due: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear.' },
                 tags: { type: 'array', items: { type: 'string' } },
                 parent_id: { type: ['string', 'null'], description: 'Move under another top-level task, or null.' },
+                workspace_id: { type: ['string', 'null'], description: 'Move the task to another workspace, or null to clear.' },
+                permission: { type: ['string', 'null'], description: 'Permission preset name, or null to follow the global setting.' },
             },
             required: ['id'],
             additionalProperties: false,
@@ -740,6 +792,8 @@ function publishTools(ctx, store) {
             due: args?.due,
             tags: args?.tags,
             parentId: args?.parent_id,
+            workspaceId: args?.workspace_id,
+            permission: args?.permission,
         }),
     });
     add({
@@ -813,6 +867,55 @@ export function apply(ctx) {
         await watched.purge(input);
         return removed;
     }
+    /**
+     * The directories a task may belong to.
+     * @returns {Promise<{ workspaces: Array<{id: string, title: string, path: string}>, available: boolean }>} the registry projection.
+     */
+    async function listWorkspaces() {
+        const registry = service(ctx, 'workspaceRegistry');
+        if (registry === undefined)
+            return { workspaces: [], available: false };
+        const workspaces = registry.list().map(workspace => ({
+            id: workspace.id,
+            title: workspace.title,
+            path: workspace.path,
+        }));
+        return { workspaces, available: true };
+    }
+    /**
+     * Register one directory as a Workspace, reusing it when it already exists.
+     * @param {Record<string, unknown>} input - `{path}`.
+     * @returns {Promise<HostWorkspace>} the workspace.
+     */
+    async function createWorkspace(input) {
+        const registry = service(ctx, 'workspaceRegistry');
+        if (registry === undefined)
+            throw storeError('unavailable', '当前 Host 没有工作区服务。');
+        const path = typeof input.path === 'string' ? input.path.trim() : '';
+        if (path === '')
+            throw storeError('bad-request', '请填写目录路径。');
+        try {
+            return await registry.create(path);
+        }
+        catch (error) {
+            throw storeError('workspace-invalid', `这个目录没法登记成工作区：${describeError(error)}`);
+        }
+    }
+    /**
+     * The Host's permission presets, for the per-task picker.
+     * @returns {Promise<{ options: HostPresetOption[], defaultPreset: string | null, available: boolean }>} the catalog.
+     */
+    async function listPermissions() {
+        const presets = service(ctx, 'permissionPresets');
+        if (presets === undefined)
+            return { options: [], defaultPreset: null, available: false };
+        const catalog = presets.catalog();
+        return {
+            options: Array.isArray(catalog.options) ? catalog.options : [],
+            defaultPreset: typeof catalog.defaultPreset === 'string' && catalog.defaultPreset !== '' ? catalog.defaultPreset : null,
+            available: true,
+        };
+    }
     const handlers = {
         list: () => watched.list(),
         create: input => watched.create(input),
@@ -830,6 +933,9 @@ export function apply(ctx) {
             available: service(ctx, 'sessionController') !== undefined,
         }),
         saveSettings: input => runner.saveSettings(input),
+        workspaces: () => listWorkspaces(),
+        createWorkspace,
+        permissions: () => listPermissions(),
     };
     /**
      * Dispatch one `/task-center/api/<method>` call.

@@ -73,9 +73,23 @@ type HostResolvedAgent = { agent: HostAgent; error?: undefined } | { agent?: und
 
 /** Session lifecycle, as far as the runner needs it. */
 interface HostSessionController {
-  create(request: { cwd?: string; sessionId?: string; agentPreset?: string }): Promise<{ sessionId: string }>
+  create(request: { workspaceId?: string; cwd?: string; sessionId?: string; agentPreset?: string }): Promise<{ sessionId: string }>
   resolveAgent(sessionId: string): Promise<HostResolvedAgent>
   cancel?(request: { sessionId: string }): unknown
+}
+
+/** One durable DSH workspace: a title plus the directory it owns. */
+interface HostWorkspace {
+  readonly id: string
+  readonly path: string
+  readonly title: string
+}
+
+/** Workspace registry (`ctx.workspaceRegistry`). */
+interface HostWorkspaceRegistry {
+  list(): HostWorkspace[]
+  get(id: string): HostWorkspace | undefined
+  create(path: string, title?: string): Promise<HostWorkspace>
 }
 
 /** One permission preset the Host can install on a session. */
@@ -87,7 +101,7 @@ interface HostPresetOption {
 
 /** Pick-and-apply surface for permission presets. */
 interface HostPermissionPresets {
-  catalog(): { options: HostPresetOption[] }
+  catalog(): { options: HostPresetOption[]; defaultPreset?: string }
   set(session: HostSession, name: string): void
   resolve(name: string): { sandbox?: string; approval?: string } | undefined
 }

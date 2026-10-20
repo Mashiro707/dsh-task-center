@@ -68,6 +68,8 @@ test('every requested visual affordance is present', () => {
     ['running pill', /\.tc-runpill\{[^}]*border-radius:999px/],
     ['running pulse', /@keyframes tc-pulse\{/],
     ['auto-run switch', /\.tc-toggle-on\{/],
+    ['workspace chip', /\.tc-ws\{[^}]*border-radius/],
+    ['inline directory row', /\.tc-inline\{[^}]*display:flex/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
 })
@@ -85,9 +87,20 @@ test('the panel can start and stop agent runs', () => {
   assert.match(source, /mutate\('run',/, 'cards must call the run endpoint')
   assert.match(source, /mutate\('cancelRun',/, 'stop button must call the cancel endpoint')
   assert.match(source, /call\('saveSettings',/, 'auto-run switch must persist through saveSettings')
-  assert.match(source, /t\('field\.cwd'\)/, 'the drawer needs a working-directory field')
   assert.match(source, /className: 'tc-toggle'/, 'the toolbar needs the auto-run switch')
-  assert.match(source, /t\('noCwd'\)/, 'a task without a directory must explain itself')
+  assert.match(source, /t\('noWorkspaceRun'\)/, 'a task without a workspace must explain itself')
+})
+
+test('a task picks its workspace and permission in the drawer', () => {
+  assert.match(source, /call\('workspaces',/, 'the drawer needs the workspace list')
+  assert.match(source, /call\('permissions',/, 'the drawer needs the permission presets')
+  assert.match(source, /call\('createWorkspace',/, 'an unknown directory must be registrable inline')
+  assert.match(source, /t\('field\.workspace'\)/, 'the drawer needs a workspace field')
+  assert.match(source, /t\('field\.permission'\)/, 'the drawer needs a permission field')
+  assert.match(source, /payload\.workspaceId = chosen\.id/, 'a quick-added task must carry its workspace')
+  assert.match(source, /workspaceId: next\.workspaceId === '' \? null : next\.workspaceId/, 'the drawer must persist the workspace')
+  assert.match(source, /permission: next\.permission === '' \? null : next\.permission/, 'the drawer must persist the permission')
+  assert.match(source, /className: 'tc-ws'/, 'cards and rows need a workspace chip')
 })
 
 test('loading the client half really appends one package-owned stylesheet', () => {

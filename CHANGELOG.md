@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-20
+
+### Added
+
+- Tasks belong to a DSH workspace. Creating or editing a task picks a workspace;
+  runs open their session with `sessionController.create({ workspaceId })`, so
+  every agent a task starts works in that workspace's directory and the session
+  shows up under it.
+- "Register a directory" in the drawer turns any existing absolute path into a
+  workspace without leaving the panel.
+- Per-task permission preset: the drawer's permission field overrides the global
+  preset for that task's runs only, and defaults to following the global one.
+- A workspace chip on cards and list rows, and a "new task in" picker in the
+  toolbar.
+- `task_workspaces` agent tool; `workspace_id` and `permission` on `task_create`
+  and `task_update`.
+- Route actions: `workspaces`, `createWorkspace`, `permissions`.
+- `workspaceId`, `workspacePath` and `permission` fields on every task.
+
+### Changed
+
+- Starting a task with neither a workspace nor a directory now fails with
+  `workspace-missing` before any session is created (was `cwd-missing`).
+
 ## [1.1.0] - 2026-10-20
 
 ### Added

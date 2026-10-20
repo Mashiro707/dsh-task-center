@@ -133,14 +133,47 @@ test('a run uses the task directory and admits one message', async () => {
   }
 })
 
-test('a task without a directory is refused before any session exists', async () => {
+test('a task with neither a workspace nor a directory is refused before any session exists', async () => {
   const { store, dispose } = await makeStore()
   try {
     const host = makeHost()
     const runner = createRunner(host.ctx, store)
     const task = await store.create({ title: '没有目录' })
-    await assert.rejects(runner.start(task.id), (error) => error.code === 'cwd-missing')
+    await assert.rejects(runner.start(task.id), (error) => error.code === 'workspace-missing')
     assert.equal(host.created.length, 0)
+  } finally {
+    await dispose()
+  }
+})
+
+test('a workspace task opens its session inside that workspace', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '用工作区', workspaceId: 'ws-1', workspacePath: 'C:/work/app' })
+
+    const result = await runner.start(task.id)
+    assert.equal(host.created.length, 1)
+    assert.equal(host.created[0].workspaceId, 'ws-1')
+    assert.equal(host.created[0].cwd, undefined)
+    assert.equal(result.run.status, 'running')
+    assert.ok(result.run.sessionId.startsWith('session-'))
+  } finally {
+    await dispose()
+  }
+})
+
+test('a task permission preset overrides the global one', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost({ presets: ['auto', 'yolo'] })
+    const runner = createRunner(host.ctx, store)
+    await runner.saveSettings({ preset: 'auto' })
+    const task = await store.create({ title: '自定义权限', cwd: 'C:/work/app', permission: 'yolo' })
+
+    await runner.start(task.id)
+    assert.deepEqual(host.installed.map((entry) => entry.name), ['yolo'])
   } finally {
     await dispose()
   }
@@ -399,6 +432,88 @@ test('the route dispatches run, settings and the delete alias', async () => {
     const board = (await post('/list', {})).value
     assert.equal(board.tasks.some((task) => task.id === second.value.id), false)
     assert.equal(board.trash.some((task) => task.id === second.value.id), false)
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previous
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the workspace and permission routes feed the drawer', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'task-center-ws-'))
+  const previous = process.env.DSH_HOME
+  process.env.DSH_HOME = dir
+  try {
+    const host = makeHost({ presets: ['auto', 'yolo'] })
+    const workspaces = [{ id: 'ws-1', path: 'C:/work/app', title: 'app', sessionIds: [], attachSession() {} }]
+    const registry = {
+      list: () => workspaces.slice(),
+      get: (id) => workspaces.find((workspace) => workspace.id === id),
+      create(path, title) {
+        const workspace = { id: 'ws-' + (workspaces.length + 1), path, title: title === undefined ? path : title, sessionIds: [], attachSession() {} }
+        workspaces.push(workspace)
+        return workspace
+      },
+    }
+    const presets = Object.assign({}, host.presets, {
+      catalog: () => ({ options: [{ value: 'auto', name: 'Auto' }, { value: 'yolo', name: 'Yolo' }], defaultPreset: 'auto' }),
+    })
+
+    let handler = null
+    const ctx = Object.assign({}, host.ctx, {
+      webServer: { register: (route) => ((handler = route.handler), () => (handler = null)) },
+      get(name) {
+        if (name === 'workspaceRegistry') return registry
+        if (name === 'permissionPresets') return presets
+        return host.ctx.get(name)
+      },
+    })
+    apply(ctx)
+
+    const post = async (method, body) => {
+      const request = {
+        method: 'POST',
+        url: '/task-center/api' + method,
+        headers: { host: 'localhost:51924' },
+        async *[Symbol.asyncIterator]() {
+          if (body !== undefined) yield Buffer.from(JSON.stringify(body))
+        },
+      }
+      const response = {
+        statusCode: 200,
+        body: '',
+        setHeader() {},
+        end(chunk) {
+          this.body = String(chunk)
+        },
+      }
+      await handler(request, response)
+      return JSON.parse(response.body)
+    }
+
+    const listed = await post('/workspaces', {})
+    assert.equal(listed.value.available, true)
+    assert.deepEqual(listed.value.workspaces, [{ id: 'ws-1', title: 'app', path: 'C:/work/app' }])
+
+    const createdWs = await post('/createWorkspace', { path: 'C:/work/other' })
+    assert.equal(createdWs.value.id, 'ws-2')
+    assert.equal(createdWs.value.path, 'C:/work/other')
+
+    const catalog = await post('/permissions', {})
+    assert.equal(catalog.value.available, true)
+    assert.deepEqual(catalog.value.options.map((option) => option.value), ['auto', 'yolo'])
+    assert.equal(catalog.value.defaultPreset, 'auto')
+
+    const task = await post('/create', { title: '工作区任务', workspaceId: 'ws-1', permission: 'yolo' })
+    assert.equal(task.value.workspaceId, 'ws-1')
+    assert.equal(task.value.permission, 'yolo')
+
+    const ran = await post('/run', { id: task.value.id })
+    assert.equal(ran.value.run.status, 'running')
+    assert.equal(host.created.length, 1)
+    assert.equal(host.created[0].workspaceId, 'ws-1')
+    assert.equal(host.created[0].cwd, undefined)
+    assert.deepEqual(host.installed.map((entry) => entry.name), ['yolo'])
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous

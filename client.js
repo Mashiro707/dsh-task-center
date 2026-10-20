@@ -96,6 +96,20 @@ window.__ModuleLoader__.load({
                 noticeRun: '已拉起智能体',
                 noticeCanceled: '已停止',
                 noticeSettings: '设置已保存',
+                'field.workspace': '工作区',
+                workspaceHint: '这个任务拉起的智能体都在该目录里工作',
+                pickWorkspace: '选择一个工作区',
+                noWorkspace: '（未指定）',
+                newDir: '登记新目录',
+                newDirPlaceholder: '已存在的绝对路径，例如 D:\\code\\my-project',
+                addWorkspace: '登记',
+                workspaceInvalid: '目录登记失败',
+                'field.permission': '权限',
+                permissionInherit: '跟随全局（{name}）',
+                permissionHint: '只影响这个任务拉起的智能体',
+                needWorkspace: '先选一个工作区，再建任务',
+                targetWs: '新建到',
+                noWorkspaceRun: '这个任务还没有工作区，先指定一个再开跑',
             },
             en: {
                 nav: 'Task Center',
@@ -179,6 +193,20 @@ window.__ModuleLoader__.load({
                 noticeRun: 'Agent started',
                 noticeCanceled: 'Stopped',
                 noticeSettings: 'Settings saved',
+                'field.workspace': 'Workspace',
+                workspaceHint: 'Agents started by this task work inside that directory',
+                pickWorkspace: 'Pick a workspace',
+                noWorkspace: '(none)',
+                newDir: 'Register a directory',
+                newDirPlaceholder: 'An existing absolute path, for example D:\\code\\my-project',
+                addWorkspace: 'Register',
+                workspaceInvalid: 'Could not register that directory',
+                'field.permission': 'Permission',
+                permissionInherit: 'Follow the global setting ({name})',
+                permissionHint: 'Only affects agents started by this task',
+                needWorkspace: 'Pick a workspace before creating a task',
+                targetWs: 'New task in',
+                noWorkspaceRun: 'This task has no workspace yet — set one before running it',
             },
         };
         let fallbackT = (key) => (DICT.zh[key] === undefined ? key : DICT.zh[key]);
@@ -350,6 +378,21 @@ window.__ModuleLoader__.load({
                 strokeLinecap: 'round',
             }));
         }
+        function FolderIcon() {
+            return h('svg', {
+                viewBox: '0 0 24 24',
+                width: 12,
+                height: 12,
+                'aria-hidden': true,
+                className: 'tc-folder-icon',
+            }, h('path', {
+                d: 'M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.4h7a1.5 1.5 0 0 1 1.5 1.5v7.6A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.7,
+                strokeLinejoin: 'round',
+            }));
+        }
         function EmptyIcon() {
             return h('svg', {
                 viewBox: '0 0 24 24',
@@ -389,6 +432,10 @@ window.__ModuleLoader__.load({
                 subtasks.length > 0 ||
                 task.priority !== 'normal';
             const meta = [];
+            const workspaceName = typeof props.workspaceName === 'string' ? props.workspaceName : '';
+            if (workspaceName !== '') {
+                meta.push(h('span', { key: 'ws', className: 'tc-ws', title: props.workspacePath === undefined ? workspaceName : props.workspacePath }, h(FolderIcon), workspaceName));
+            }
             if (task.priority !== 'normal') {
                 meta.push(h('span', { key: 'pri', className: 'tc-pri tc-pri-' + task.priority }, t('priority.' + task.priority)));
             }
@@ -490,6 +537,8 @@ window.__ModuleLoader__.load({
                     key: task.id,
                     task,
                     t,
+                    workspaceName: props.workspaceNameOf(task),
+                    workspacePath: task.workspacePath === null || task.workspacePath === undefined ? undefined : task.workspacePath,
                     subtasks: props.childrenOf.get(task.id) || [],
                     dragging: props.dragId === task.id,
                     onOpen: props.onOpen,
@@ -510,8 +559,17 @@ window.__ModuleLoader__.load({
                 priority: task.priority,
                 due: task.due === null ? '' : task.due,
                 tags: task.tags.join(', '),
+                workspaceId: task.workspaceId === null || task.workspaceId === undefined ? '' : task.workspaceId,
+                permission: task.permission === null || task.permission === undefined ? '' : task.permission,
                 cwd: task.cwd === null || task.cwd === undefined ? '' : task.cwd,
             }));
+            const [dirDraft, setDirDraft] = useState('');
+            const [dirBusy, setDirBusy] = useState(false);
+            const workspaces = Array.isArray(props.workspaces) ? props.workspaces : [];
+            const permissions = Array.isArray(props.permissions) ? props.permissions : [];
+            const globalPreset = typeof props.globalPreset === 'string' && props.globalPreset !== '' ? props.globalPreset : 'auto';
+            const presetLabel = permissions.find((option) => option.value === globalPreset);
+            const inheritLabel = t('permissionInherit').replace('{name}', presetLabel === undefined ? globalPreset : presetLabel.name);
             const [subDraft, setSubDraft] = useState('');
             const [saveState, setSaveState] = useState('idle');
             const timerRef = React.useRef(null);
@@ -554,7 +612,8 @@ window.__ModuleLoader__.load({
             const stage = (patch) => {
                 setForm((previous) => {
                     const next = Object.assign({}, previous, patch);
-                    const payload = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), cwd: next.cwd.trim() === '' ? null : next.cwd.trim() };
+                    const chosen = workspaces.find((entry) => entry.id === next.workspaceId);
+                    const payload = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: chosen === undefined ? null : chosen.path, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim() };
                     if (next.title.trim() !== '')
                         payload.title = next.title.trim();
                     pendingRef.current = payload;
@@ -623,13 +682,39 @@ window.__ModuleLoader__.load({
                 className: 'tc-input',
                 value: form.due,
                 onChange: (event) => stage({ due: event.target.value }),
-            }))), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.cwd')), h('input', {
+            }))), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.workspace')), h('select', {
+                className: 'tc-input',
+                value: form.workspaceId,
+                onChange: (event) => stage({ workspaceId: event.target.value }),
+            }, h('option', { value: '' }, t('noWorkspace')), workspaces.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.title + ' — ' + entry.path))), h('span', { className: 'tc-fieldhint' }, t('workspaceHint'))), h('div', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('newDir')), h('div', { className: 'tc-inline' }, h('input', {
                 className: 'tc-input tc-path',
-                value: form.cwd,
-                placeholder: t('cwdPlaceholder'),
-                onChange: (event) => stage({ cwd: event.target.value }),
-                onBlur: flush,
-            }), h('span', { className: 'tc-fieldhint' }, t('cwdHint')))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupContent')), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.tags')), h('input', {
+                value: dirDraft,
+                placeholder: t('newDirPlaceholder'),
+                disabled: dirBusy,
+                onChange: (event) => setDirDraft(event.target.value),
+            }), h('button', {
+                type: 'button',
+                className: 'tc-btn',
+                disabled: dirBusy || dirDraft.trim() === '',
+                onClick: () => {
+                    if (dirBusy || dirDraft.trim() === '')
+                        return;
+                    setDirBusy(true);
+                    Promise.resolve(props.onCreateWorkspace(dirDraft.trim())).then((created) => {
+                        setDirBusy(false);
+                        if (created === null)
+                            return;
+                        setDirDraft('');
+                        stage({ workspaceId: created.id });
+                    }, () => setDirBusy(false));
+                },
+            }, t('addWorkspace')))), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.permission')), h('select', {
+                className: 'tc-input',
+                value: form.permission,
+                onChange: (event) => stage({ permission: event.target.value }),
+            }, h('option', { value: '' }, inheritLabel), permissions
+                .filter((option) => option.value !== globalPreset)
+                .map((option) => h('option', { key: option.value, value: option.value }, option.name))), h('span', { className: 'tc-fieldhint' }, t('permissionHint')))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupContent')), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.tags')), h('input', {
                 className: 'tc-input',
                 value: form.tags,
                 placeholder: t('tagsPlaceholder'),
@@ -677,6 +762,7 @@ window.__ModuleLoader__.load({
                 : props.roots.map((task) => {
                     const subtasks = props.childrenOf.get(task.id) || [];
                     const finished = subtasks.filter((child) => child.status === 'done').length;
+                    const workspaceName = typeof props.workspaceNameOf === 'function' ? props.workspaceNameOf(task) : '';
                     return h('div', { key: task.id, className: 'tc-row' + (task.status === 'done' ? ' tc-row-done' : '') }, h('button', {
                         type: 'button',
                         className: 'tc-check' + (task.status === 'done' ? ' tc-check-on' : ''),
@@ -686,7 +772,7 @@ window.__ModuleLoader__.load({
                         ? null
                         : h('span', { className: 'tc-due' + dueTone(task.due) }, dueLabel(task.due, t)), subtasks.length === 0
                         ? null
-                        : h('span', { className: 'tc-subtag' }, t('subtaskProgress', { done: finished, total: subtasks.length })), task.tags.length === 0
+                        : h('span', { className: 'tc-subtag' }, t('subtaskProgress', { done: finished, total: subtasks.length })), workspaceName === '' ? null : h('span', { className: 'tc-ws' }, h(FolderIcon), workspaceName), task.tags.length === 0
                         ? null
                         : h('span', { className: 'tc-tags' }, task.tags.map((name) => h('span', { key: name, className: 'tc-tag' }, name))), h('select', {
                         className: 'tc-input tc-select-sm',
@@ -734,6 +820,10 @@ window.__ModuleLoader__.load({
             const [dragId, setDragId] = useState('');
             const [dropZone, setDropZone] = useState('');
             const [runner, setRunner] = useState(null);
+            const [workspaces, setWorkspaces] = useState([]);
+            const [permissions, setPermissions] = useState([]);
+            const [defaultPreset, setDefaultPreset] = useState('');
+            const [targetWs, setTargetWs] = useState('');
             const addRef = React.useRef(null);
             const refresh = React.useCallback(async () => {
                 try {
@@ -747,6 +837,21 @@ window.__ModuleLoader__.load({
                     catch (error) {
                         // The board still works without the runner settings.
                     }
+                    try {
+                        const found = await call('workspaces', {});
+                        setWorkspaces(Array.isArray(found.workspaces) ? found.workspaces : []);
+                    }
+                    catch (error) {
+                        setWorkspaces([]);
+                    }
+                    try {
+                        const catalog = await call('permissions', {});
+                        setPermissions(Array.isArray(catalog.options) ? catalog.options : []);
+                        setDefaultPreset(typeof catalog.defaultPreset === 'string' ? catalog.defaultPreset : '');
+                    }
+                    catch (error) {
+                        setPermissions([]);
+                    }
                 }
                 catch (error) {
                     setPhase('error');
@@ -756,6 +861,14 @@ window.__ModuleLoader__.load({
             React.useEffect(() => {
                 void refresh();
             }, [refresh]);
+            // Keep the quick-add target pointing at a workspace that still exists.
+            React.useEffect(() => {
+                if (workspaces.length === 0)
+                    return;
+                if (workspaces.some((entry) => entry.id === targetWs))
+                    return;
+                setTargetWs(workspaces[0].id);
+            }, [workspaces, targetWs]);
             React.useEffect(() => {
                 if (notice === null)
                     return undefined;
@@ -843,11 +956,50 @@ window.__ModuleLoader__.load({
                 const value = title.trim();
                 if (value === '')
                     return false;
-                const ok = await mutate('create', { title: value, status });
+                if (workspaces.length > 0 && targetWs === '') {
+                    setNotice({ kind: 'error', text: t('needWorkspace') });
+                    return false;
+                }
+                const chosen = workspaces.find((entry) => entry.id === targetWs);
+                const payload = { title: value, status };
+                if (chosen !== undefined) {
+                    payload.workspaceId = chosen.id;
+                    payload.workspacePath = chosen.path;
+                }
+                const ok = await mutate('create', payload);
                 if (ok)
                     setNotice({ kind: 'ok', text: t('noticeCreated') });
                 return ok;
             };
+            /** Register a directory as a workspace, then point the picker at it. */
+            const createWorkspace = async (path) => {
+                try {
+                    const created = await call('createWorkspace', { path });
+                    await refresh();
+                    setNotice({ kind: 'ok', text: created.title });
+                    return created;
+                }
+                catch (error) {
+                    setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) });
+                    return null;
+                }
+            };
+            /** Display name for a task's workspace: the live title, else the directory basename. */
+            const workspaceNameOf = React.useCallback((task) => {
+                if (task === null || task === undefined)
+                    return '';
+                const id = typeof task.workspaceId === 'string' ? task.workspaceId : '';
+                if (id !== '') {
+                    const found = workspaces.find((entry) => entry.id === id);
+                    if (found !== undefined)
+                        return found.title;
+                }
+                const raw = typeof task.workspacePath === 'string' && task.workspacePath !== '' ? task.workspacePath : typeof task.cwd === 'string' ? task.cwd : '';
+                if (raw === '')
+                    return '';
+                const parts = raw.split(/[\\/]+/).filter((part) => part !== '');
+                return parts.length === 0 ? raw : parts[parts.length - 1];
+            }, [workspaces]);
             const submitDraft = async () => {
                 const ok = await createTask(draft, draftStatus);
                 if (ok)
@@ -878,12 +1030,14 @@ window.__ModuleLoader__.load({
                 if (addRef.current !== null)
                     addRef.current.focus();
             };
-            /** Open the drawer instead of running a task that has no directory yet. */
+            /** Open the drawer instead of running a task that has neither a workspace nor a directory. */
             const startRun = async (id) => {
                 const task = tasks.find((entry) => entry.id === id) || null;
-                if (task !== null && (task.cwd === null || task.cwd === undefined || task.cwd === '')) {
+                const hasWorkspace = task !== null && typeof task.workspaceId === 'string' && task.workspaceId !== '';
+                const hasCwd = task !== null && typeof task.cwd === 'string' && task.cwd !== '';
+                if (task !== null && !hasWorkspace && !hasCwd) {
                     setOpenId(id);
-                    setNotice({ kind: 'error', text: t('noCwd') });
+                    setNotice({ kind: 'error', text: t('noWorkspaceRun') });
                     return;
                 }
                 const ok = await mutate('run', { id });
@@ -957,6 +1111,7 @@ window.__ModuleLoader__.load({
                         t,
                         tasks: columnTasks[id],
                         childrenOf,
+                        workspaceNameOf,
                         dragId,
                         active: dropZone === id,
                         onAdd: focusAdd,
@@ -994,7 +1149,15 @@ window.__ModuleLoader__.load({
                 value: draftStatus,
                 'aria-label': t('field.status'),
                 onChange: (event) => setDraftStatus(event.target.value),
-            }, COLUMNS.map((id) => h('option', { key: id, value: id }, t('column.' + id)))), h('button', { type: 'button', className: 'tc-btn tc-btn-primary', onClick: () => void submitDraft() }, t('create'))), h('div', { className: 'tc-searchwrap' }, h(SearchIcon), h('input', {
+            }, COLUMNS.map((id) => h('option', { key: id, value: id }, t('column.' + id)))), workspaces.length === 0
+                ? null
+                : h('select', {
+                    className: 'tc-input tc-select-sm tc-ws-select',
+                    value: targetWs,
+                    'aria-label': t('targetWs'),
+                    title: t('targetWs'),
+                    onChange: (event) => setTargetWs(event.target.value),
+                }, h('option', { value: '' }, t('pickWorkspace')), workspaces.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.title))), h('button', { type: 'button', className: 'tc-btn tc-btn-primary', onClick: () => void submitDraft() }, t('create'))), h('div', { className: 'tc-searchwrap' }, h(SearchIcon), h('input', {
                 className: 'tc-input tc-search',
                 value: query,
                 placeholder: t('search'),
@@ -1027,6 +1190,10 @@ window.__ModuleLoader__.load({
                     t,
                     task: openTask,
                     subtasks: openSubtasks,
+                    workspaces,
+                    permissions,
+                    globalPreset: runner !== null && typeof runner.preset === 'string' ? runner.preset : defaultPreset,
+                    onCreateWorkspace: createWorkspace,
                     onClose: () => setOpenId(''),
                     onPatch: patchOpen,
                     onCreateSubtask: async (title) => {
@@ -1218,6 +1385,12 @@ window.__ModuleLoader__.load({
 .tc-label{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary)}
 .tc-fieldhint{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);opacity:.8}
 .tc-path{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.tc-inline{display:flex;gap:8px;align-items:center;min-width:0}
+.tc-inline .tc-input{flex:1 1 auto;min-width:0}
+.tc-inline .tc-btn{flex:0 0 auto;padding:5px 12px}
+.tc-ws{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);padding:0 7px 0 6px;border-radius:6px;max-width:150px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tc-folder-icon{flex:0 0 auto;opacity:.8}
+.tc-ws-select{max-width:170px}
 .tc-textarea{resize:vertical;min-height:72px;font-family:inherit;line-height:1.55;font-size:13px}
 .tc-seg{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1)}
 .tc-seg-btn{flex:1 1 0;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:1.4;padding:5px 2px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:color .12s ease,background .12s ease}
