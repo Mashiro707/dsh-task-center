@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build scratch
+*.tsbuildinfo
+.npm-cache/
+
+# runtime data (the plugin writes under $DSH_HOME, but keep stray copies out)
+tasks.json
+*.corrupt-*
+
+# local verification leftovers
+.smoke*/
+.verify/
+.baseline-*
+
+# os / editor noise
+.DS_Store
+Thumbs.db
+*.log

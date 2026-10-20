@@ -1,0 +1,73 @@
+{
+  "name": "dsh-task-center",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Kanban task center for DeepSeek Harness: a four-column Web panel plus agent tools for managing tasks.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "harness",
+    "plugin",
+    "bundle",
+    "task",
+    "todo",
+    "kanban",
+    "web-ui"
+  ],
+  "homepage": "https://github.com/mashiro707/dsh-task-center#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mashiro707/dsh-task-center.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mashiro707/dsh-task-center/issues"
+  },
+  "author": "Mashiro",
+  "license": "Apache-2.0",
+  "icon": "icon.svg",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "test": "npm run build && node --test test/store.test.mjs test/client-ui.test.mjs"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "tsconfig.host.json",
+    "tsconfig.client.json",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "任务中心",
+    "description": "带四列看板、清单视图、截止日期、标签、子任务与回收站的个人任务管理面板；数据持久化在本机，并向 Agent 提供 task_list / task_create / task_update / task_delete 工具。"
+  }
+}

@@ -1,0 +1,9 @@
+# Bundle patch layer.
+#
+# The row loads this package's main entry as the host half (a plain Cordis
+# plugin: JSON store + /task-center/api routes + task_* agent tools), and the
+# `dsh.client` declaration in package.json makes the Web app load ./client.js
+# as the browser half that draws the sidebar entry and the panel.
+- insert:
+    - id: dsh-task-center
+      name: 'dsh-task-center'

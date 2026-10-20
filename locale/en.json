@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Task Center",
+    "description": "A personal task manager with a four-column board, list view, due dates, tags, subtasks and a recycle bin. Data lives on this machine, and the agent gets task_list / task_create / task_update / task_delete."
+  }
+}
