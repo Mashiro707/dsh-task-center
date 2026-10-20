@@ -99,7 +99,7 @@ interface HostContext {
   logger?: HostLogger
   effect<T>(run: () => T, label?: string): T
   /** Resolve one optional host service by name; undefined when not composed. */
-  get<T = unknown>(service: string): T | undefined
+  get?<T = unknown>(service: string): T | undefined
   /** Subscribe to one host event; the subscription dies with the context. */
   on(event: string, listener: (...args: never[]) => void): HostDisposer | void
 }

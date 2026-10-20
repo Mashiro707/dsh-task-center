@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createRunner, type TaskRunner } from './runner.js'
+import { createRunner, service, type TaskRunner } from './runner.js'
 
 /** One HTTP request as handed to a route handler. */
 type HttpRequest = import('node:http').IncomingMessage
@@ -857,7 +857,7 @@ export function apply(ctx: HostContext): void {
     cancelRun: input => runner.cancel(requireId(input)),
     settings: async () => ({
       ...(await runner.settings()),
-      available: ctx.get('sessionController') !== undefined,
+      available: service(ctx, 'sessionController') !== undefined,
     }),
     saveSettings: input => runner.saveSettings(input),
   }

@@ -104,6 +104,35 @@ function normalizeSettings(raw) {
     };
 }
 /**
+ * Look a host service up by name.
+ *
+ * Cordis exposes services as plain properties (`ctx.sessionController`) and also
+ * answers `ctx.get(name)`; accessing an uncomposed service may throw. Both are
+ * tried, so the runner works whether or not the service is there.
+ * @param {HostContext} context - the host context.
+ * @param {string} name - service name.
+ * @returns {T | undefined} the service, or undefined when it is not composed.
+ */
+export function service(context, name) {
+    const lookup = context.get;
+    if (typeof lookup === 'function') {
+        try {
+            const found = lookup.call(context, name);
+            if (found !== undefined && found !== null)
+                return found;
+        }
+        catch {
+            // Some contexts throw for an unknown service; fall through to the property.
+        }
+    }
+    try {
+        return context[name];
+    }
+    catch {
+        return undefined;
+    }
+}
+/**
  * Build one runner bound to a store and the live host context.
  * @param {HostContext} ctx - host context.
  * @param {RunnerStore} store - the shared store.
@@ -150,7 +179,7 @@ export function createRunner(ctx, store) {
      * @returns {void}
      */
     function installPreset(agent, name) {
-        const presets = ctx.get('permissionPresets');
+        const presets = service(ctx, 'permissionPresets');
         if (presets === undefined)
             return;
         try {
@@ -203,7 +232,7 @@ export function createRunner(ctx, store) {
     async function start(taskId) {
         if (disposed)
             throw runnerError('unavailable', '任务中心已经卸载，无法开跑。');
-        const controller = ctx.get('sessionController');
+        const controller = service(ctx, 'sessionController');
         if (controller === undefined) {
             throw runnerError('unavailable', '当前 Host 没有会话服务，没法拉起智能体。');
         }
@@ -238,7 +267,7 @@ export function createRunner(ctx, store) {
             taskToSession.delete(task.id);
             throw runnerError('unavailable', `投递任务失败：${describe(error)}`);
         }
-        const sessions = ctx.get('sessions');
+        const sessions = service(ctx, 'sessions');
         if (sessions !== undefined && typeof sessions.flush === 'function') {
             try {
                 await sessions.flush(agent.session);
@@ -317,7 +346,7 @@ export function createRunner(ctx, store) {
             const sessionId = taskToSession.get(taskId);
             if (sessionId === undefined)
                 return { canceled: false };
-            const controller = ctx.get('sessionController');
+            const controller = service(ctx, 'sessionController');
             try {
                 controller?.cancel?.({ sessionId });
             }

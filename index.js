@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createRunner } from './runner.js';
+import { createRunner, service } from './runner.js';
 /** Host services this plugin needs before `apply` runs. */
 export const inject = ['webServer', 'tools'];
 /** Route prefix owned by this plugin. */
@@ -815,7 +815,7 @@ export function apply(ctx) {
         cancelRun: input => runner.cancel(requireId(input)),
         settings: async () => ({
             ...(await runner.settings()),
-            available: ctx.get('sessionController') !== undefined,
+            available: service(ctx, 'sessionController') !== undefined,
         }),
         saveSettings: input => runner.saveSettings(input),
     };

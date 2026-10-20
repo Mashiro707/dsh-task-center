@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { createTaskStore } from '../index.js'
 import { apply } from '../index.js'
-import { buildPrompt, createRunner, createUserMessage } from '../runner.js'
+import { buildPrompt, createRunner, createUserMessage, service } from '../runner.js'
 
 /** Poll until `check` returns something truthy, or fail. */
 async function waitFor(check, timeout = 2000) {
@@ -79,6 +79,8 @@ function makeHost(options = {}) {
 
   return {
     ctx,
+    controller,
+    presets,
     created,
     installed,
     agents,
@@ -394,6 +396,35 @@ test('the route dispatches run, settings and the delete alias', async () => {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('services are found by property as well as by get()', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+
+    // A context that only exposes services as properties, with no get() at all.
+    const propertyOnly = { ...host.ctx, sessionController: host.controller, permissionPresets: host.presets }
+    delete propertyOnly.get
+    const byProperty = createRunner(propertyOnly, store)
+    const first = await store.create({ title: '属性式宿主', cwd: 'C:/work/app' })
+    const result = await byProperty.start(first.id)
+    assert.equal(result.run.status, 'running')
+    assert.equal(host.created.length, 1)
+
+    // A context whose get() throws (inactive services do that) still works.
+    const throwing = {
+      ...host.ctx,
+      sessionController: host.controller,
+      get() {
+        throw new Error('cannot get required service "sessionController" in inactive context')
+      },
+    }
+    assert.equal(service(throwing, 'sessionController'), host.controller)
+    assert.equal(service(host.ctx, 'nope'), undefined)
+  } finally {
+    await dispose()
   }
 })
 
