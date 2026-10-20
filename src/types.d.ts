@@ -15,17 +15,19 @@ type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done'
 type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
 
 /** Lifecycle of one automatic agent run attached to a task. */
-type TaskRunStatus = 'running' | 'done' | 'failed'
+type TaskRunStatus = 'queued' | 'running' | 'done' | 'failed'
 
 /** One automatic agent run: which session ran the task, and how it ended. */
 interface TaskRun {
-  /** Session the plugin created for this run, or null before admission. */
+  /** Session the plugin created for this run, or null while queued. */
   sessionId: string | null
   status: TaskRunStatus
   startedAt: number
   endedAt: number | null
   /** Failure text, or the closing note; null while running or on success. */
   message: string | null
+  /** 1 on the first launch; grows with each retry. */
+  attempts: number
 }
 
 /** One normalized task row, exactly as it is stored on disk. */
@@ -48,6 +50,8 @@ interface TaskRecord {
   cwd: string | null
   /** Latest automatic run, or null when the task was never run. */
   run: TaskRun | null
+  /** Ids of tasks that must reach `done` before this one may run. */
+  blockedBy: string[]
   /** Parent task id; subtasks are exactly one level deep. */
   parentId: string | null
   createdAt: number
@@ -71,6 +75,7 @@ interface TaskCreateInput {
   workspacePath?: string | null
   permission?: string | null
   cwd?: string | null
+  blockedBy?: string[]
 }
 
 /** Fields accepted when updating a task; only what is present is applied. */
@@ -87,6 +92,7 @@ interface TaskUpdateInput {
   workspacePath?: string | null
   permission?: string | null
   cwd?: string | null
+  blockedBy?: string[]
   /** Written by the runner only, never by a caller patching content. */
   run?: TaskRun | null
 }

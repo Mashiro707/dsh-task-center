@@ -70,12 +70,17 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 任务有了工作区（或老式的工作目录）后，卡片右上角就会浮出 ▶。点它，插件会起一个 DSH 会话，把任务简报作为一条用户消息投进去，任务同时进「进行中」；卡片上的徽章显示已跑时长，点它可停止。
 
 - **全局自动开关**（工具栏那个圆点按钮）：打开后，任何进入「进行中」且能跑到目录的任务都会自动开跑
-- **并发上限**：默认 2，可在详情/设置里改，硬上限 4
+- **排队**：并发满了不报错，任务进队列（卡片显示「排队中」胶囊，点它取消排队）；腾出位置时按先后顺序自动开跑
+- **并发上限**：默认 2，工具条可改，硬上限 4
+- **超时**：单次运行最多 N 分钟（默认 30，0 表示不限），到点先取消会话再记 `failed`
+- **重试**：失败或超时后自动重跑，默认 0 次，最多 3 次；每次尝试累加 `run.attempts`
+- **前置任务（依赖）**：抽屉里勾选前置任务，它们没 done 之前开不了跑（直接报 `blocked`）
+- **依赖解锁**：自动开跑打开时，某个任务完成会把只差它一个的下游任务排上
 - **收尾**：agent 空闲即视为做完，任务留「进行中」等你验收；agent 报错则记 `failed`，原因写进 `run.message`
-- **中断恢复**：插件或宿主重启时，还在 `running` 的行会被标成「运行中断」，不会假装还在跑
+- **中断恢复**：插件或宿主重启时，还在 `running` 的行会被标成「运行中断」；`queued` 的行在自动开跑关着时被取消，不会假装还在跑
 - **权限回落**：任务没指定预设时用全局预设（默认 `auto`：逐次调用复核，最接近无人值守）；预设不存在时只记一条 warn，不阻断开跑
 
-任务多了三个字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）与 `run`（`{sessionId, status: running|done|failed, startedAt, endedAt, message}`）。
+任务多了五个字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）、`blockedBy`（前置任务 id）与 `run`（`{sessionId, status: queued|running|done|failed, startedAt, endedAt, message, attempts}`）。
 
 ### agent 工具
 
@@ -83,8 +88,8 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 | --- | --- | --- |
 | `task_list` | 列出任务（子任务挂在父任务下）与回收站 | `status` / `tag` / `query` / `include_trash` |
 | `task_workspaces` | 列出可选工作区（id、标题、目录） | — |
-| `task_create` | 新建任务 | `title`（必填）/ `notes` / `status` / `priority` / `due` / `tags` / `parent_id` / `workspace_id` / `permission` |
-| `task_update` | 只改传入的字段 | `id`（必填）+ 同上各字段，`due`、`parent_id`、`workspace_id`、`permission` 可传 `null` 清空 |
+| `task_create` | 新建任务 | `title`（必填）/ `notes` / `status` / `priority` / `due` / `tags` / `parent_id` / `workspace_id` / `permission` / `blocked_by` |
+| `task_update` | 只改传入的字段 | `id`（必填）+ 同上各字段，`due`、`parent_id`、`workspace_id`、`permission` 可传 `null` 清空，`blocked_by` 传空数组清空 |
 | `task_delete` | 删除任务（默认进回收站） | `id`（必填）/ `permanent` |
 
 状态：`todo` `doing` `blocked` `done`；优先级：`low` `normal` `high` `urgent`。
@@ -96,10 +101,11 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 | action | 作用 |
 | --- | --- |
 | `list` / `create` / `update` / `remove` / `delete`（`remove` 的别名）/ `restore` / `purge` / `emptyTrash` | 任务 CRUD 与回收站；`remove` / `delete` 传 `permanent: true` 时直接抹掉，不进回收站 |
-| `run` / `cancelRun` | 起一个 agent / 停止它 |
+| `run` / `cancelRun` | 起一个 agent（并发满则排队）/ 停止它或取消排队 |
+| `queue` | 当前的排队情况 `{queued, running, concurrency}` |
 | `workspaces` / `createWorkspace` | 列出可选工作区 / 把某个绝对路径登记成工作区 |
 | `permissions` | 宿主提供的权限预设列表（`{options, defaultPreset, available}`） |
-| `settings` / `saveSettings` | 读/写 `{autoRun, concurrency, preset}`，`settings` 另回 `available`（宿主有没有会话服务） |
+| `settings` / `saveSettings` | 读/写 `{autoRun, concurrency, preset, timeoutMinutes, retries}`，`settings` 另回 `available`（宿主有没有会话服务） |
 
 设置存放在任务文件旁边的 `settings.json`，同样走原子写入。
 

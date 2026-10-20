@@ -166,3 +166,13 @@ test('the browser half is authored in TypeScript and stays a script', async () =
   assert.equal(/declare\s+function\s+require/.test(host), false,
     'the host half imports node builtins instead of declaring a CommonJS require')
 })
+
+test('queues, timeouts and blockers are all visible in the panel', () => {
+  assert.match(source, /tc-runpill-queued/, 'a parked run needs its own pill')
+  assert.match(source, /t\('cancelQueued'\)/, 'a parked run must be cancellable')
+  assert.match(source, /t\('field\.timeout'\)/, 'the toolbar exposes the timeout setting')
+  assert.match(source, /t\('field\.retries'\)/, 'the toolbar exposes the retry setting')
+  assert.match(source, /groupDeps/, 'the drawer needs a dependencies group')
+  assert.match(source, /blockedBy: next\.blockedBy/, 'the drawer must save the blockers it picked')
+  assert.match(css, /\.tc-blocker-on\{/, 'a picked blocker needs a visible state')
+})

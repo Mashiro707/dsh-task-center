@@ -50,6 +50,7 @@ window.__ModuleLoader__.load({
         'field.title': '标题',
         groupSchedule: '状态与时间',
         groupContent: '内容',
+        groupDeps: '依赖',
         tagsPlaceholder: '用逗号分隔',
         notesPlaceholder: '补充说明…',
         dueClear: '清除日期',
@@ -91,6 +92,19 @@ window.__ModuleLoader__.load({
         autoRunOn: '自动：开',
         autoRunOff: '自动：关',
         autoRunHint: '任务进入「进行中」时自动拉起一个智能体',
+        queued: '排队中',
+        cancelQueued: '取消排队',
+        queueHint: '同时最多跑 {n} 个，其余的在这里等',
+        'field.timeout': '超时',
+        timeoutHint: '单次运行最多多少分钟，0 表示不限',
+        'field.retries': '重试',
+        retriesHint: '失败或超时后再试几次',
+        'field.blockers': '前置任务',
+        blockersHint: '这些都完成之后，这个任务才会开跑',
+        noBlockers: '没有可选的前置任务',
+        blockerPending: '等 {n} 个前置任务',
+        noticeQueued: '已排队',
+        noticeUnblocked: '前置已完成，已开跑',
         'field.cwd': '工作目录',
         cwdPlaceholder: '绝对路径，例如 D:\\code\\my-project',
         cwdHint: '开跑时智能体就在这个目录里工作',
@@ -147,6 +161,7 @@ window.__ModuleLoader__.load({
         'field.title': 'Title',
         groupSchedule: 'Status and schedule',
         groupContent: 'Content',
+        groupDeps: 'Dependencies',
         tagsPlaceholder: 'Comma separated',
         notesPlaceholder: 'Anything worth remembering…',
         dueClear: 'Clear date',
@@ -188,6 +203,19 @@ window.__ModuleLoader__.load({
         autoRunOn: 'Auto: on',
         autoRunOff: 'Auto: off',
         autoRunHint: 'Start an agent by itself when a task moves to Doing',
+        queued: 'Queued',
+        cancelQueued: 'Leave the queue',
+        queueHint: 'At most {n} run at once; the rest wait here',
+        'field.timeout': 'Timeout',
+        timeoutHint: 'Minutes one attempt may take; 0 means no limit',
+        'field.retries': 'Retries',
+        retriesHint: 'Extra attempts after a failure or a timeout',
+        'field.blockers': 'Blocked by',
+        blockersHint: 'This task starts only after those are done',
+        noBlockers: 'No other task can be picked',
+        blockerPending: 'Waiting on {n} task(s)',
+        noticeQueued: 'Queued',
+        noticeUnblocked: 'Blockers cleared, agent started',
         'field.cwd': 'Working directory',
         cwdPlaceholder: 'Absolute path, for example D:\\code\\my-project',
         cwdHint: 'The agent works in this directory when the task runs',
@@ -481,8 +509,9 @@ window.__ModuleLoader__.load({
       const finished = subtasks.filter((child) => child.status === 'done').length
       const run = task.run === null || task.run === undefined ? null : task.run
       const running = run !== null && run.status === 'running'
+      const queued = run !== null && run.status === 'queued'
       const failed = run !== null && run.status === 'failed'
-      const canRun = !running && task.status !== 'done'
+      const canRun = !running && !queued && task.status !== 'done'
       const hasMeta =
         task.due !== null ||
         task.tags.length > 0 ||
@@ -588,7 +617,24 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'tc-run-time' }, elapsedLabel(run.startedAt)),
                 h(StopIcon),
               )
-            : canRun
+            : queued
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'tc-runpill tc-runpill-queued',
+                    title: t('cancelQueued'),
+                    'aria-label': t('cancelQueued'),
+                    onClick: (event) => {
+                      event.stopPropagation()
+                      props.onCancelRun(task.id)
+                    },
+                  },
+                  h('span', { className: 'tc-queue-dot', 'aria-hidden': true }),
+                  h('span', { className: 'tc-run-time' }, t('queued')),
+                  h(StopIcon),
+                )
+              : canRun
               ? h(
                   'button',
                   {
@@ -696,9 +742,14 @@ window.__ModuleLoader__.load({
         workspacePath: task.workspacePath === null || task.workspacePath === undefined ? '' : task.workspacePath,
         permission: task.permission === null || task.permission === undefined ? '' : task.permission,
         cwd: task.cwd === null || task.cwd === undefined ? '' : task.cwd,
+        blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy.slice() : [],
       }))
       const [dirDraft, setDirDraft] = useState('')
       const [dirBusy, setDirBusy] = useState(false)
+      const allTasks = Array.isArray(props.tasks) ? props.tasks : []
+      const candidates = allTasks.filter(
+        (entry) => entry.id !== task.id && entry.parentId !== task.id,
+      )
       const workspaces = Array.isArray(props.workspaces) ? props.workspaces : []
       const permissions = Array.isArray(props.permissions) ? props.permissions : []
       const globalPreset = typeof props.globalPreset === 'string' && props.globalPreset !== '' ? props.globalPreset : 'auto'
@@ -754,7 +805,7 @@ window.__ModuleLoader__.load({
           const next = Object.assign({}, previous, patch)
           const chosen = workspaces.find((entry) => entry.id === next.workspaceId)
           const storedPath = next.workspacePath !== '' ? next.workspacePath : chosen === undefined ? '' : chosen.path
-          const payload: Omit<TaskUpdateInput, 'id'> = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: next.workspaceId === '' || storedPath === '' ? null : storedPath, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim() }
+          const payload: Omit<TaskUpdateInput, 'id'> = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: next.workspaceId === '' || storedPath === '' ? null : storedPath, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim(), blockedBy: next.blockedBy }
           if (next.title.trim() !== '') payload.title = next.title.trim()
           pendingRef.current = payload
           return next
@@ -962,6 +1013,43 @@ window.__ModuleLoader__.load({
               ),
               h('span', { className: 'tc-fieldhint' }, t('permissionHint')),
             ),
+          ),
+          h(
+            'section',
+            { className: 'tc-group' },
+            h('span', { className: 'tc-group-title' }, t('groupDeps')),
+            candidates.length === 0
+              ? h('p', { className: 'tc-fieldhint' }, t('noBlockers'))
+              : h(
+                  'div',
+                  { className: 'tc-blockers' },
+                  candidates.map((candidate) => {
+                    const checked = form.blockedBy.indexOf(candidate.id) !== -1
+                    return h(
+                      'label',
+                      {
+                        key: candidate.id,
+                        className: 'tc-blocker' + (checked ? ' tc-blocker-on' : ''),
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        className: 'tc-blocker-check',
+                        checked,
+                        onChange: () => {
+                          const next = checked
+                            ? form.blockedBy.filter((entry) => entry !== candidate.id)
+                            : form.blockedBy.concat([candidate.id])
+                          stage({ blockedBy: next })
+                        },
+                      }),
+                      h('span', { className: 'tc-blocker-title' }, candidate.title),
+                      candidate.status === 'done'
+                        ? h('span', { className: 'tc-blocker-done' }, t('column.done'))
+                        : null,
+                    )
+                  }),
+                ),
+            h('span', { className: 'tc-fieldhint' }, t('blockersHint')),
           ),
           h(
             'section',
@@ -1267,6 +1355,16 @@ window.__ModuleLoader__.load({
       const tasks = board !== null && Array.isArray(board.tasks) ? board.tasks : []
       const trash = board !== null && Array.isArray(board.trash) ? board.trash : []
 
+      const queuedCount = React.useMemo(() => {
+        let total = 0
+        for (const task of tasks) {
+          if (task.run !== null && task.run !== undefined && task.run.status === 'queued') total += 1
+        }
+        return total
+      }, [tasks])
+
+      const concurrency = runner !== null && typeof runner.concurrency === 'number' ? runner.concurrency : 0
+
       const tags = React.useMemo(() => {
         const seen = new Set<string>()
         for (const task of tasks) for (const name of task.tags) seen.add(name)
@@ -1416,6 +1514,17 @@ window.__ModuleLoader__.load({
         }
         const ok = await mutate('run', { id })
         if (ok) setNotice({ kind: 'ok', text: t('noticeRun') })
+      }
+
+      /** Save one settings patch and adopt whatever the host answers with. */
+      const saveSetting = async (patch) => {
+        try {
+          const value = await call('saveSettings', patch)
+          setRunner(Object.assign({}, runner === null ? {} : runner, value))
+          setNotice({ kind: 'ok', text: t('noticeSettings') })
+        } catch (error: any) {
+          setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) })
+        }
       }
 
       const stopRun = async (id) => {
@@ -1634,6 +1743,41 @@ window.__ModuleLoader__.load({
               h('span', { className: 'tc-toggle-dot', 'aria-hidden': true }),
               t(runner !== null && runner.autoRun === true ? 'autoRunOn' : 'autoRunOff'),
             ),
+            runner === null || runner.available === false
+              ? null
+              : h(
+                  'label',
+                  { className: 'tc-mini', title: t('timeoutHint') },
+                  h('span', { className: 'tc-mini-label' }, t('field.timeout')),
+                  h('input', {
+                    type: 'number',
+                    className: 'tc-input tc-num',
+                    min: 0,
+                    max: 1440,
+                    'aria-label': t('field.timeout'),
+                    value: String(typeof runner.timeoutMinutes === 'number' ? runner.timeoutMinutes : 30),
+                    onChange: (event) => void saveSetting({ timeoutMinutes: Number(event.target.value) }),
+                  }),
+                ),
+            runner === null || runner.available === false
+              ? null
+              : h(
+                  'label',
+                  { className: 'tc-mini', title: t('retriesHint') },
+                  h('span', { className: 'tc-mini-label' }, t('field.retries')),
+                  h('input', {
+                    type: 'number',
+                    className: 'tc-input tc-num',
+                    min: 0,
+                    max: 3,
+                    'aria-label': t('field.retries'),
+                    value: String(typeof runner.retries === 'number' ? runner.retries : 0),
+                    onChange: (event) => void saveSetting({ retries: Number(event.target.value) }),
+                  }),
+                ),
+            queuedCount === 0
+              ? null
+              : h('span', { className: 'tc-queuebadge', title: t('queueHint', { n: concurrency }) }, t('queued') + ' ' + String(queuedCount)),
           ),
           banner.length === 0 ? null : h('div', { className: 'tc-banner' }, banner),
         ),
@@ -1652,6 +1796,7 @@ window.__ModuleLoader__.load({
               t,
               task: openTask,
               subtasks: openSubtasks,
+              tasks,
               workspaces,
               permissions,
               globalPreset: runner !== null && typeof runner.preset === 'string' ? runner.preset : defaultPreset,
@@ -1742,6 +1887,13 @@ window.__ModuleLoader__.load({
 .tc-toggle-on{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent)}
 .tc-toggle-on:hover{color:var(--dsw-alias-state-success-primary)}
 .tc-toggle-on .tc-toggle-dot{background:var(--dsw-alias-state-success-primary)}
+.tc-mini{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.tc-mini-label{color:var(--dsw-alias-label-tertiary)}
+.tc-num{width:56px;padding:4px 6px;font-variant-numeric:tabular-nums;text-align:center}
+.tc-queuebadge{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:1.4;padding:3px 9px;border-radius:999px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-variant-numeric:tabular-nums}
+.tc-runpill-queued{color:var(--dsw-alias-label-secondary);border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}
+.tc-runpill-queued:hover{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 36%,transparent)}
+.tc-queue-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-warn-primary)}
 
 /* ---------------------------------------------------------------- banner */
 .tc-banner{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px}
@@ -1856,6 +2008,13 @@ window.__ModuleLoader__.load({
 .tc-field-half{flex:1 1 0;min-width:0}
 .tc-label{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary)}
 .tc-fieldhint{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);opacity:.8}
+.tc-blockers{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
+.tc-blocker{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);cursor:pointer;border:1px solid transparent}
+.tc-blocker:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 7%,transparent)}
+.tc-blocker-on{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l1);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent)}
+.tc-blocker-check{flex:0 0 auto;accent-color:var(--dsw-alias-brand-primary);margin:0}
+.tc-blocker-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tc-blocker-done{flex:0 0 auto;font-size:12px;color:var(--dsw-alias-state-success-primary)}
 .tc-path{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
 .tc-inline{display:flex;gap:8px;align-items:center;min-width:0}
 .tc-inline .tc-input{flex:1 1 auto;min-width:0}

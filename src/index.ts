@@ -248,15 +248,17 @@ function normalizeRun(raw: unknown): TaskRun | null {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
   const source = raw as Record<string, unknown>
   const status: TaskRunStatus =
-    source.status === 'running' || source.status === 'done' || source.status === 'failed'
+    source.status === 'queued' || source.status === 'running' || source.status === 'done' || source.status === 'failed'
       ? source.status
       : 'failed'
+  const attempts = Number.isFinite(source.attempts) && (source.attempts as number) > 0 ? Math.trunc(source.attempts as number) : status === 'queued' ? 0 : 1
   return {
     sessionId: typeof source.sessionId === 'string' && source.sessionId !== '' ? source.sessionId : null,
     status,
     startedAt: Number.isFinite(source.startedAt) ? (source.startedAt as number) : Date.now(),
     endedAt: Number.isFinite(source.endedAt) ? (source.endedAt as number) : null,
     message: typeof source.message === 'string' && source.message !== '' ? source.message : null,
+    attempts,
   }
 }
 
@@ -278,6 +280,21 @@ function cleanText(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
+}
+
+/**
+ * @param {unknown} value - stored value.
+ * @returns {string[]} de-duplicated non-empty ids, in the given order.
+ */
+function cleanIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const id = entry.trim()
+    if (id !== '') seen.add(id)
+  }
+  return [...seen]
 }
 
 /**
@@ -305,6 +322,7 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     workspacePath: cleanCwd(raw.workspacePath),
     permission: cleanText(raw.permission),
     cwd: cleanCwd(raw.cwd),
+    blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
     run: normalizeRun(raw.run),
     parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
     createdAt,
@@ -508,6 +526,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           workspacePath: cleanCwd(input.workspacePath),
           permission: cleanText(input.permission),
           cwd: cleanCwd(input.cwd),
+          blockedBy: cleanIdList(input.blockedBy),
           run: null,
           parentId,
           createdAt: now,
@@ -538,6 +557,9 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
         if (input.workspacePath !== undefined) record.workspacePath = cleanCwd(input.workspacePath)
         if (input.permission !== undefined) record.permission = cleanText(input.permission)
         if (input.cwd !== undefined) record.cwd = cleanCwd(input.cwd)
+        if (input.blockedBy !== undefined) {
+          record.blockedBy = cleanIdList(input.blockedBy).filter(entry => entry !== record.id)
+        }
         if (input.run !== undefined) record.run = normalizeRun(input.run)
         if (input.status !== undefined) {
           const status = cleanStatus(input.status)
@@ -776,6 +798,11 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         parent_id: { type: 'string', description: 'Id of the top-level task to nest under.' },
         workspace_id: { type: 'string', description: 'Id of the DSH workspace this task belongs to. Use task_workspaces to see the choices.' },
         permission: { type: 'string', description: 'Permission preset name for this task\'s runs; omit to follow the global setting.' },
+        blocked_by: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ids of tasks that must be done before this one may run.',
+        },
       },
       required: ['title'],
       additionalProperties: false,
@@ -792,6 +819,7 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         parentId: args?.parent_id,
         workspaceId: args?.workspace_id,
         permission: args?.permission,
+        blockedBy: args?.blocked_by,
       }),
   })
 
@@ -812,6 +840,11 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         parent_id: { type: ['string', 'null'], description: 'Move under another top-level task, or null.' },
         workspace_id: { type: ['string', 'null'], description: 'Move the task to another workspace, or null to clear.' },
         permission: { type: ['string', 'null'], description: 'Permission preset name, or null to follow the global setting.' },
+        blocked_by: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ids of tasks that must be done before this one may run; an empty array clears them.',
+        },
       },
       required: ['id'],
       additionalProperties: false,
@@ -829,6 +862,7 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         parentId: args?.parent_id,
         workspaceId: args?.workspace_id,
         permission: args?.permission,
+        blockedBy: args?.blocked_by,
       }),
   })
 
@@ -971,6 +1005,7 @@ export function apply(ctx: HostContext): void {
       available: service(ctx, 'sessionController') !== undefined,
     }),
     saveSettings: input => runner.saveSettings(input),
+    queue: () => runner.queue(),
     workspaces: () => listWorkspaces(),
     createWorkspace,
     permissions: () => listPermissions(),

@@ -195,3 +195,19 @@ test('the request fence accepts loopback and rejects cross-site', () => {
   assert.equal(isTrustedRequest({ host: '127.0.0.1:63788', origin: 'https://evil.example.com' }), false)
   assert.equal(isTrustedRequest({ host: '127.0.0.1:63788', origin: 'http://127.0.0.1:63788' }), true)
 })
+
+test('blockers are stored, de-duplicated and reloaded', async () => {
+  const { dataFile, store } = await makeStore()
+  const first = await store.create({ title: '前置', cwd: 'C:/work/a' })
+  const second = await store.create({ title: '后置', cwd: 'C:/work/b', blockedBy: [first.id, first.id, '  '] })
+
+  assert.deepEqual(second.blockedBy, [first.id])
+  const reopened = await createTaskStore({ dataFile }).list()
+  assert.deepEqual(reopened.tasks.find((entry) => entry.id === second.id).blockedBy, [first.id])
+
+  // A task cannot block itself, and an empty array clears the list.
+  const patched = await store.update({ id: second.id, blockedBy: [second.id, first.id] })
+  assert.deepEqual(patched.blockedBy, [first.id])
+  const cleared = await store.update({ id: second.id, blockedBy: [] })
+  assert.deepEqual(cleared.blockedBy, [])
+})

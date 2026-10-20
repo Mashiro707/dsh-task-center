@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-20
+
+### Added
+
+- A run that finds every slot taken now waits in a queue instead of failing.
+  Queued runs show a pill on the card, can be cancelled, and start by themselves
+  as soon as a slot frees up. `run.status` gained `queued`, and the new `queue`
+  action reports `{queued, running, concurrency}`.
+- Wall-clock timeout per attempt (`timeoutMinutes`, default 30, 0 disables it):
+  the session is cancelled and the run is marked failed.
+- Automatic retries (`retries`, default 0, at most 3) after a failure or a
+  timeout; `run.attempts` counts the attempts made.
+- Task dependencies: `blockedBy` lists the tasks that must be `done` first. A
+  blocked task refuses to start, blocks are shown in the drawer, and when
+  auto-run is on, finishing a task queues its dependents automatically.
+- `blocked_by` on `task_create` / `task_update`; timeout and retry inputs in the
+  toolbar; a dependencies group in the drawer.
+
+### Changed
+
+- `reconcile` also cancels queued rows when auto-run is off, and returns
+  `{repaired, requeued}`.
+
 ## [1.2.0] - 2026-10-20
 
 ### Added

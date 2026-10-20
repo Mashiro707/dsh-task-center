@@ -193,7 +193,7 @@ test('one task cannot be running twice', async () => {
   }
 })
 
-test('the concurrency cap turns the next start away', async () => {
+test('the concurrency cap parks the next start in the queue', async () => {
   const { store, dispose } = await makeStore()
   try {
     const host = makeHost()
@@ -201,8 +201,29 @@ test('the concurrency cap turns the next start away', async () => {
     await runner.saveSettings({ concurrency: 1 })
     const first = await store.create({ title: '一', cwd: 'C:/work/a' })
     const second = await store.create({ title: '二', cwd: 'C:/work/b' })
+
     await runner.start(first.id)
-    await assert.rejects(runner.start(second.id), (error) => error.code === 'busy')
+    const parked = await runner.start(second.id)
+    assert.equal(parked.run.status, 'queued')
+    assert.equal(parked.run.sessionId, null)
+    assert.equal(parked.status, 'todo', '排队不算开跑')
+
+    const state = await runner.queue()
+    assert.deepEqual(state.queued, [second.id])
+    assert.equal(state.running, 1)
+    assert.equal(state.concurrency, 1)
+
+    // Nothing was created for the parked task.
+    assert.equal(host.created.length, 1)
+
+    // Finishing the first one lets the second start by itself.
+    host.emit('agent/status', { agent: host.agents.get('session-1'), status: 'idle' })
+    const started = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === second.id)
+      return row.run !== null && row.run.status === 'running' ? row : null
+    })
+    assert.equal(started.run.sessionId, 'session-2')
+    assert.equal(host.created.length, 2)
   } finally {
     await dispose()
   }
@@ -300,10 +321,18 @@ test('settings persist, clamp and reload', async () => {
   try {
     const host = makeHost()
     const runner = createRunner(host.ctx, store)
-    assert.deepEqual(await runner.settings(), { autoRun: false, concurrency: 2, preset: 'auto' })
+    assert.deepEqual(await runner.settings(), {
+      autoRun: false,
+      concurrency: 2,
+      preset: 'auto',
+      timeoutMinutes: 30,
+      retries: 0,
+    })
 
     const saved = await runner.saveSettings({ autoRun: true, concurrency: 3, preset: 'auto' })
-    assert.deepEqual(saved, { autoRun: true, concurrency: 3, preset: 'auto' })
+    assert.equal(saved.autoRun, true)
+    assert.equal(saved.concurrency, 3)
+    assert.equal(saved.preset, 'auto')
     const raw = JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8'))
     assert.equal(raw.autoRun, true)
     assert.equal(raw.concurrency, 3)
@@ -313,7 +342,10 @@ test('settings persist, clamp and reload', async () => {
     assert.equal(clamped.autoRun, true, 'a partial patch keeps the rest')
 
     const fresh = createRunner(host.ctx, store)
-    assert.deepEqual(await fresh.settings(), { autoRun: true, concurrency: 4, preset: 'auto' })
+    const reloaded = await fresh.settings()
+    assert.equal(reloaded.autoRun, true)
+    assert.equal(reloaded.concurrency, 4)
+    assert.equal(reloaded.preset, 'auto')
   } finally {
     await dispose()
   }
@@ -327,7 +359,13 @@ test('an uncomposed session controller is reported, not crashed', async () => {
     const runner = createRunner(bare, store)
     const task = await store.create({ title: '无宿主', cwd: 'C:/work/app' })
     await assert.rejects(runner.start(task.id), (error) => error.code === 'unavailable')
-    assert.deepEqual(await runner.settings(), { autoRun: false, concurrency: 2, preset: 'auto' })
+    assert.deepEqual(await runner.settings(), {
+      autoRun: false,
+      concurrency: 2,
+      preset: 'auto',
+      timeoutMinutes: 30,
+      retries: 0,
+    })
   } finally {
     await dispose()
   }
@@ -344,12 +382,12 @@ test('reconcile marks runs left over from a previous load as interrupted', async
       run: { sessionId: 'session-gone', status: 'running', startedAt: 1, endedAt: null, message: null },
     })
 
-    assert.deepEqual(await runner.reconcile(), { repaired: 1 })
+    assert.deepEqual(await runner.reconcile(), { repaired: 1, requeued: 0 })
     const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
     assert.equal(row.run.status, 'failed')
     assert.ok(row.run.message.includes('运行中断'))
     // Idempotent: nothing left to repair.
-    assert.deepEqual(await runner.reconcile(), { repaired: 0 })
+    assert.deepEqual(await runner.reconcile(), { repaired: 0, requeued: 0 })
   } finally {
     await dispose()
   }
@@ -579,4 +617,78 @@ test('the prompt is built from the task and the message is frozen', async () => 
   assert.ok(Object.isFrozen(message.content))
   assert.equal(message.role, 'user')
   assert.notEqual(createUserMessage('hello').id, message.id)
+})
+
+test('a run that outlives the timeout is cancelled and marked failed', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    await runner.saveSettings({ timeoutMinutes: 0.01 })
+    const task = await store.create({ title: '超时', cwd: 'C:/work/slow' })
+
+    await runner.start(task.id)
+
+    const failed = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row.run !== null && row.run.status === 'failed' ? row : null
+    }, 4000)
+    assert.equal(host.agents.get('session-1').status, 'cancelled')
+    assert.match(failed.run.message, /超时/)
+    assert.equal(failed.run.attempts, 1)
+  } finally {
+    await dispose()
+  }
+})
+
+test('a failed attempt is retried as far as the settings allow', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    await runner.saveSettings({ timeoutMinutes: 0.01, retries: 1 })
+    const task = await store.create({ title: '重试', cwd: 'C:/work/retry' })
+
+    await runner.start(task.id)
+    await waitFor(() => (host.created.length === 2 ? true : null), 4000)
+
+    host.emit('agent/status', { agent: host.agents.get('session-2'), status: 'idle' })
+    const done = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row.run !== null && row.run.status === 'done' ? row : null
+    })
+    assert.equal(done.run.attempts, 2)
+
+    // No third attempt: retries are exhausted.
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    assert.equal(host.created.length, 2)
+  } finally {
+    await dispose()
+  }
+})
+
+test('a task waits for its blockers and starts when they finish', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    await runner.saveSettings({ autoRun: true })
+    const blocker = await store.create({ title: '前置', cwd: 'C:/work/a' })
+    const dependent = await store.create({ title: '后置', cwd: 'C:/work/b', blockedBy: [blocker.id] })
+
+    await assert.rejects(runner.start(dependent.id), (error) => error.code === 'blocked')
+    assert.equal(host.created.length, 0)
+
+    const finished = await store.update({ id: blocker.id, status: 'done' })
+    runner.onTaskChanged(finished)
+
+    const started = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === dependent.id)
+      return row.run !== null && row.run.status === 'running' ? row : null
+    })
+    assert.equal(started.run.sessionId, 'session-1')
+    assert.equal(started.blockedBy.length, 1)
+  } finally {
+    await dispose()
+  }
 })

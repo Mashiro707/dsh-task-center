@@ -15,6 +15,12 @@ import { dirname, join } from 'node:path';
 const MAX_CONCURRENCY = 4;
 /** Preset that reviews each call before it runs; the closest thing to unattended. */
 const DEFAULT_PRESET = 'auto';
+/** Retries the panel may ask for, on top of the first attempt. */
+const MAX_RETRIES = 3;
+/** Wall-clock limit for one attempt, in minutes, when nobody configured one. */
+const DEFAULT_TIMEOUT_MINUTES = 30;
+/** Upper bound the timeout setting is clamped to, in minutes. */
+const MAX_TIMEOUT_MINUTES = 24 * 60;
 /**
  * @param {string} code - stable error code the route maps to a status.
  * @param {string} message - user-facing text.
@@ -65,11 +71,16 @@ export function createUserMessage(text) {
  * Render the task into the prompt one agent receives.
  * @param {TaskRecord} task - the task to run.
  * @param {string} cwd - working directory the session starts in.
+ * @param {TaskRecord[]} board - every live task, used to name the blockers.
  * @returns {string} the prompt.
  */
-export function buildPrompt(task, cwd) {
+export function buildPrompt(task, cwd, board = []) {
     const tags = task.tags.length > 0 ? task.tags.join(' / ') : '无';
     const workspace = (task.workspacePath ?? '').trim() === '' ? '' : `所属工作区：${task.workspacePath}\n`;
+    const finished = (task.blockedBy ?? [])
+        .map(id => board.find(entry => entry.id === id))
+        .filter((entry) => entry !== undefined)
+        .map(entry => `- ${entry.id} ${entry.title}`);
     return [
         '你是任务中心自动拉起的执行智能体。请把下面这个任务真正做完。',
         '',
@@ -79,6 +90,7 @@ export function buildPrompt(task, cwd) {
         `标签：${tags}`,
         `工作目录：${cwd}`,
         ...(workspace === '' ? [] : [workspace.trimEnd()]),
+        ...(finished.length === 0 ? [] : ['前置任务（都已完成，可以直接依赖它们的结果）：', ...finished]),
         '',
         '说明：',
         task.notes.trim() === '' ? '（无）' : task.notes.trim(),
@@ -99,10 +111,14 @@ export function buildPrompt(task, cwd) {
 function normalizeSettings(raw) {
     const source = raw !== null && typeof raw === 'object' ? raw : {};
     const concurrency = Number.isFinite(source.concurrency) ? Math.trunc(source.concurrency) : 2;
+    const timeout = Number.isFinite(source.timeoutMinutes) ? source.timeoutMinutes : DEFAULT_TIMEOUT_MINUTES;
+    const retries = Number.isFinite(source.retries) ? Math.trunc(source.retries) : 0;
     return {
         autoRun: source.autoRun === true,
         concurrency: Math.min(MAX_CONCURRENCY, Math.max(1, concurrency)),
         preset: typeof source.preset === 'string' && source.preset !== '' ? source.preset : DEFAULT_PRESET,
+        timeoutMinutes: Math.min(MAX_TIMEOUT_MINUTES, Math.max(0, timeout)),
+        retries: Math.min(MAX_RETRIES, Math.max(0, retries)),
     };
 }
 /**
@@ -135,6 +151,23 @@ export function service(context, name) {
     }
 }
 /**
+ * The blockers of one task that are not done yet.
+ * @param {TaskRecord} task - the task about to run.
+ * @param {TaskRecord[]} board - every live task.
+ * @returns {TaskRecord[]} unfinished prerequisites, in the declared order.
+ */
+function pendingBlockers(task, board) {
+    const found = [];
+    for (const id of task.blockedBy) {
+        const blocker = board.find(entry => entry.id === id);
+        if (blocker === undefined)
+            continue;
+        if (blocker.status !== 'done')
+            found.push(blocker);
+    }
+    return found;
+}
+/**
  * Build one runner bound to a store and the live host context.
  * @param {HostContext} ctx - host context.
  * @param {RunnerStore} store - the shared store.
@@ -146,8 +179,13 @@ export function createRunner(ctx, store) {
     const sessionToTask = new Map();
     /** taskId -> sessionId, the reverse lookup the panel needs. */
     const taskToSession = new Map();
+    /** Task ids waiting for a slot, in start order. */
+    const queue = [];
+    /** taskId -> timeout handle for the current attempt. */
+    const timers = new Map();
     let settings = null;
     let disposed = false;
+    let draining = false;
     /**
      * @returns {Promise<RunnerSettings>} the settings, read at most once.
      */
@@ -197,26 +235,50 @@ export function createRunner(ctx, store) {
         }
     }
     /**
-     * Record the end of one run, whichever way it ended.
+     * Write one run row back to its task, ignoring rows that moved on.
      * @param {string} taskId - task being run.
-     * @param {string} sessionId - the run's session.
-     * @param {TaskRunStatus} status - how it ended.
-     * @param {string | null} message - failure text.
+     * @param {TaskRun} run - the row to write.
      * @returns {Promise<void>} resolves once the store is updated.
      */
-    async function settle(taskId, sessionId, status, message) {
+    async function writeRun(taskId, run) {
+        try {
+            await store.update({ id: taskId, run });
+        }
+        catch (error) {
+            ctx.logger?.warn?.(`[task-center] 运行结果没能写回任务 ${taskId}：${describe(error)}`);
+        }
+    }
+    /**
+     * Record the end of one attempt, then retry it when the settings allow.
+     * @param {string} taskId - task being run.
+     * @param {string} sessionId - the attempt's session.
+     * @param {TaskRunStatus} status - how it ended.
+     * @param {string | null} message - failure text.
+     * @param {{retry?: boolean}} options - whether a retry is allowed.
+     * @returns {Promise<void>} resolves once the store is updated.
+     */
+    async function settle(taskId, sessionId, status, message, options = {}) {
         if (sessionToTask.get(sessionId) !== taskId)
             return;
         sessionToTask.delete(sessionId);
         taskToSession.delete(taskId);
+        const timer = timers.get(taskId);
+        if (timer !== undefined) {
+            clearTimeout(timer);
+            timers.delete(taskId);
+        }
         if (disposed)
             return;
+        let attempts = 1;
+        let retryable = false;
         try {
             const board = await store.list();
             const task = board.tasks.find(entry => entry.id === taskId);
             const run = task?.run ?? null;
             if (task === undefined || run === null || run.sessionId !== sessionId)
                 return;
+            attempts = run.attempts;
+            retryable = options.retry === true && message !== null;
             await store.update({
                 id: taskId,
                 run: { ...run, status, endedAt: Date.now(), message },
@@ -225,34 +287,74 @@ export function createRunner(ctx, store) {
         catch (error) {
             ctx.logger?.warn?.(`[task-center] 运行结果没能写回任务 ${taskId}：${describe(error)}`);
         }
+        void drain();
+        if (!retryable)
+            return;
+        const config = await readSettings();
+        if (attempts > config.retries)
+            return;
+        try {
+            await start(taskId);
+            ctx.logger?.info?.(`[task-center] 第 ${attempts} 次尝试失败，已重新排队。`);
+        }
+        catch (error) {
+            ctx.logger?.warn?.(`[task-center] 重试没能排上：${describe(error)}`);
+        }
     }
     /**
-     * Start one run.
-     * @param {string} taskId - the task to run.
+     * Cancel the session of one attempt, ignoring a Host that cannot cancel.
+     * @param {string} sessionId - session to stop.
+     * @returns {void}
+     */
+    function cancelSession(sessionId) {
+        const controller = service(ctx, 'sessionController');
+        try {
+            controller?.cancel?.({ sessionId });
+        }
+        catch (error) {
+            ctx.logger?.warn?.(`[task-center] 取消会话失败：${describe(error)}`);
+        }
+    }
+    /**
+     * Arm the wall-clock limit for one attempt.
+     * @param {string} taskId - the task being run.
+     * @param {string} sessionId - its session.
+     * @param {number} minutes - limit in minutes; 0 means no limit.
+     * @returns {void}
+     */
+    function armTimeout(taskId, sessionId, minutes) {
+        const previous = timers.get(taskId);
+        if (previous !== undefined)
+            clearTimeout(previous);
+        if (minutes <= 0) {
+            timers.delete(taskId);
+            return;
+        }
+        const handle = setTimeout(() => {
+            if (sessionToTask.get(sessionId) !== taskId)
+                return;
+            cancelSession(sessionId);
+            void settle(taskId, sessionId, 'failed', `运行超时（${minutes} 分钟）`, { retry: true });
+        }, minutes * 60 * 1000);
+        if (typeof handle === 'object' && handle !== null && 'unref' in handle)
+            handle.unref();
+        timers.set(taskId, handle);
+    }
+    /**
+     * Create the session and admit the prompt for one attempt.
+     * @param {TaskRecord} task - the task to run.
+     * @param {TaskRecord[]} board - every live task, for the prompt.
      * @returns {Promise<TaskRecord>} the task, now in `doing` with a live run.
      */
-    async function start(taskId) {
-        if (disposed)
-            throw runnerError('unavailable', '任务中心已经卸载，无法开跑。');
+    async function launch(task, board) {
         const controller = service(ctx, 'sessionController');
         if (controller === undefined) {
             throw runnerError('unavailable', '当前 Host 没有会话服务，没法拉起智能体。');
         }
-        const board = await store.list();
-        const task = board.tasks.find(entry => entry.id === taskId);
-        if (task === undefined)
-            throw runnerError('not-found', `找不到任务 ${taskId}。`);
-        if (task.run !== null && task.run.status === 'running')
-            throw runnerError('running', '这个任务已经在跑了。');
+        const config = await readSettings();
         const workspaceId = (task.workspaceId ?? '').trim();
         const cwd = (task.cwd ?? '').trim();
-        if (workspaceId === '' && cwd === '') {
-            throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。');
-        }
-        const config = await readSettings();
-        if (taskToSession.size >= config.concurrency) {
-            throw runnerError('busy', `同时最多跑 ${config.concurrency} 个任务，先等一个结束。`);
-        }
+        const attempt = (task.run?.attempts ?? 0) + 1;
         // Exactly one of the two: the Host rejects a request naming both.
         const created = await controller.create(workspaceId === '' ? { cwd } : { workspaceId });
         const resolved = await controller.resolveAgent(created.sessionId);
@@ -266,7 +368,7 @@ export function createRunner(ctx, store) {
         sessionToTask.set(agent.id, task.id);
         taskToSession.set(task.id, agent.id);
         try {
-            agent.followup(createUserMessage(buildPrompt(task, workspaceId === '' ? cwd : task.workspacePath ?? cwd)));
+            agent.followup(createUserMessage(buildPrompt(task, workspaceId === '' ? cwd : task.workspacePath ?? cwd, board)));
         }
         catch (error) {
             sessionToTask.delete(agent.id);
@@ -282,6 +384,7 @@ export function createRunner(ctx, store) {
                 ctx.logger?.warn?.(`[task-center] 会话落盘失败：${describe(error)}`);
             }
         }
+        armTimeout(task.id, agent.id, config.timeoutMinutes);
         return store.update({
             id: task.id,
             status: 'doing',
@@ -291,11 +394,151 @@ export function createRunner(ctx, store) {
                 startedAt: Date.now(),
                 endedAt: null,
                 message: null,
+                attempts: attempt,
             },
         });
     }
     /**
-     * React to a task mutation: `autoRun` may start it now.
+     * Park one task until a slot frees up.
+     * @param {TaskRecord} task - the task to queue.
+     * @returns {Promise<TaskRecord>} the task, now with a `queued` run.
+     */
+    async function enqueue(task) {
+        if (!queue.includes(task.id))
+            queue.push(task.id);
+        return store.update({
+            id: task.id,
+            run: {
+                sessionId: null,
+                status: 'queued',
+                startedAt: Date.now(),
+                endedAt: null,
+                message: null,
+                attempts: task.run?.attempts ?? 0,
+            },
+        });
+    }
+    /**
+     * Start whatever is waiting, as far as the concurrency cap allows.
+     * @returns {Promise<void>} resolves when the queue cannot advance further.
+     */
+    async function drain() {
+        if (disposed || draining)
+            return;
+        draining = true;
+        try {
+            const config = await readSettings();
+            while (!disposed && queue.length > 0 && taskToSession.size < config.concurrency) {
+                const taskId = queue.shift();
+                try {
+                    const board = await store.list();
+                    const task = board.tasks.find(entry => entry.id === taskId);
+                    if (task === undefined || task.deletedAt !== null)
+                        continue;
+                    if (task.run !== null && task.run.status === 'running')
+                        continue;
+                    const blockers = pendingBlockers(task, board.tasks);
+                    if (blockers.length > 0) {
+                        await writeRun(taskId, {
+                            sessionId: null,
+                            status: 'failed',
+                            startedAt: task.run?.startedAt ?? Date.now(),
+                            endedAt: Date.now(),
+                            message: `前置任务还没完成：${blockers.map(entry => entry.title).join('、')}`,
+                            attempts: task.run?.attempts ?? 0,
+                        });
+                        continue;
+                    }
+                    if ((task.workspaceId ?? '').trim() === '' && (task.cwd ?? '').trim() === '') {
+                        await writeRun(taskId, {
+                            sessionId: null,
+                            status: 'failed',
+                            startedAt: task.run?.startedAt ?? Date.now(),
+                            endedAt: Date.now(),
+                            message: '没有可用的工作区，排队已取消',
+                            attempts: task.run?.attempts ?? 0,
+                        });
+                        continue;
+                    }
+                    await launch(task, board.tasks);
+                }
+                catch (error) {
+                    ctx.logger?.warn?.(`[task-center] 排队任务 ${taskId} 起不来：${describe(error)}`);
+                }
+            }
+        }
+        finally {
+            draining = false;
+        }
+    }
+    /**
+     * Start one run, or park it when every slot is taken.
+     * @param {string} taskId - the task to run.
+     * @returns {Promise<TaskRecord>} the task, queued or running.
+     */
+    async function start(taskId) {
+        if (disposed)
+            throw runnerError('unavailable', '任务中心已经卸载，无法开跑。');
+        const controller = service(ctx, 'sessionController');
+        if (controller === undefined) {
+            throw runnerError('unavailable', '当前 Host 没有会话服务，没法拉起智能体。');
+        }
+        const board = await store.list();
+        const task = board.tasks.find(entry => entry.id === taskId);
+        if (task === undefined)
+            throw runnerError('not-found', `找不到任务 ${taskId}。`);
+        if (task.run !== null && task.run.status === 'running')
+            throw runnerError('running', '这个任务已经在跑了。');
+        if (queue.includes(taskId))
+            return enqueue(task);
+        const workspaceId = (task.workspaceId ?? '').trim();
+        const cwd = (task.cwd ?? '').trim();
+        if (workspaceId === '' && cwd === '') {
+            throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。');
+        }
+        const blockers = pendingBlockers(task, board.tasks);
+        if (blockers.length > 0) {
+            throw runnerError('blocked', `还有 ${blockers.length} 个前置任务没完成：${blockers.map(entry => entry.title).join('、')}`);
+        }
+        const config = await readSettings();
+        if (taskToSession.size >= config.concurrency)
+            return enqueue(task);
+        return launch(task, board.tasks);
+    }
+    /**
+     * Start every dependent that just became runnable.
+     * @param {TaskRecord} done - the task that reached `done`.
+     * @returns {Promise<void>} resolves when the sweep is over.
+     */
+    async function unlockDependents(done) {
+        const config = await readSettings();
+        if (!config.autoRun)
+            return;
+        const board = await store.list();
+        for (const candidate of board.tasks) {
+            if (!candidate.blockedBy.includes(done.id))
+                continue;
+            if (candidate.deletedAt !== null)
+                continue;
+            if (candidate.status === 'done')
+                continue;
+            if (candidate.run !== null && (candidate.run.status === 'running' || candidate.run.status === 'queued'))
+                continue;
+            if (pendingBlockers(candidate, board.tasks).length > 0)
+                continue;
+            if ((candidate.workspaceId ?? '').trim() === '' && (candidate.cwd ?? '').trim() === '')
+                continue;
+            try {
+                await start(candidate.id);
+                ctx.logger?.info?.(`[task-center] 前置完成，${candidate.id} 开始排队/开跑。`);
+            }
+            catch (error) {
+                ctx.logger?.warn?.(`[task-center] 解锁 ${candidate.id} 失败：${describe(error)}`);
+            }
+        }
+    }
+    /**
+     * React to a task mutation: `autoRun` may start it, and dependents may unlock.
      * @param {TaskRecord} record - the row as it was just written.
      * @returns {void}
      */
@@ -304,11 +547,17 @@ export function createRunner(ctx, store) {
             return;
         if (record.deletedAt !== null)
             return;
+        if (record.status === 'done') {
+            void unlockDependents(record);
+            return;
+        }
         if (record.status !== 'doing')
             return;
-        if (record.run !== null && record.run.status === 'running')
+        if (record.run !== null && (record.run.status === 'running' || record.run.status === 'queued'))
             return;
         if (taskToSession.has(record.id))
+            return;
+        if (queue.includes(record.id))
             return;
         void (async () => {
             const config = await readSettings();
@@ -316,10 +565,6 @@ export function createRunner(ctx, store) {
                 return;
             if ((record.workspaceId ?? '').trim() === '' && (record.cwd ?? '').trim() === '')
                 return;
-            if (taskToSession.size >= config.concurrency) {
-                ctx.logger?.info?.(`[task-center] 并发已满，${record.id} 排队等下一次。`);
-                return;
-            }
             try {
                 await start(record.id);
             }
@@ -338,7 +583,7 @@ export function createRunner(ctx, store) {
         const taskId = sessionToTask.get(payload.agent.id);
         if (taskId === undefined)
             return;
-        void settle(taskId, payload.agent.id, 'failed', describe(payload.error));
+        void settle(taskId, payload.agent.id, 'failed', describe(payload.error), { retry: true });
     });
     ctx.on('agent/disposed', (payload) => {
         const taskId = sessionToTask.get(payload.agent.id);
@@ -349,18 +594,32 @@ export function createRunner(ctx, store) {
     return {
         start,
         async cancel(taskId) {
+            const position = queue.indexOf(taskId);
+            if (position >= 0) {
+                queue.splice(position, 1);
+                const board = await store.list();
+                const task = board.tasks.find(entry => entry.id === taskId);
+                if (task !== undefined && task.run !== null) {
+                    await writeRun(taskId, {
+                        ...task.run,
+                        status: 'failed',
+                        endedAt: Date.now(),
+                        message: '排队已取消',
+                    });
+                }
+                void drain();
+                return { canceled: true };
+            }
             const sessionId = taskToSession.get(taskId);
             if (sessionId === undefined)
                 return { canceled: false };
-            const controller = service(ctx, 'sessionController');
-            try {
-                controller?.cancel?.({ sessionId });
-            }
-            catch (error) {
-                ctx.logger?.warn?.(`[task-center] 取消会话失败：${describe(error)}`);
-            }
+            cancelSession(sessionId);
             await settle(taskId, sessionId, 'failed', '已取消');
             return { canceled: true };
+        },
+        async queue() {
+            const config = await readSettings();
+            return { queued: [...queue], running: taskToSession.size, concurrency: config.concurrency };
         },
         settings: readSettings,
         async saveSettings(patch = {}) {
@@ -369,38 +628,62 @@ export function createRunner(ctx, store) {
                 autoRun: patch.autoRun === undefined ? current.autoRun : patch.autoRun,
                 concurrency: patch.concurrency === undefined ? current.concurrency : patch.concurrency,
                 preset: patch.preset === undefined ? current.preset : patch.preset,
+                timeoutMinutes: patch.timeoutMinutes === undefined ? current.timeoutMinutes : patch.timeoutMinutes,
+                retries: patch.retries === undefined ? current.retries : patch.retries,
             });
             await writeSettings(next);
+            const wasIdle = taskToSession.size < current.concurrency;
+            const nowRoom = taskToSession.size < next.concurrency;
+            if (nowRoom && (!wasIdle || next.concurrency > current.concurrency))
+                void drain();
             return next;
         },
         onTaskChanged,
         async reconcile() {
             const board = await store.list();
             let repaired = 0;
+            let requeued = 0;
+            const config = await readSettings();
             for (const task of board.tasks) {
                 const run = task.run;
-                if (run === null || run.status !== 'running')
+                if (run === null)
                     continue;
-                try {
-                    await store.update({
-                        id: task.id,
-                        run: {
+                if (run.status === 'running') {
+                    await writeRun(task.id, {
+                        ...run,
+                        status: 'failed',
+                        endedAt: run.endedAt ?? Date.now(),
+                        message: '运行中断（Host 或插件已重启）',
+                    });
+                    repaired += 1;
+                    continue;
+                }
+                if (run.status === 'queued') {
+                    if (config.autoRun) {
+                        if (!queue.includes(task.id))
+                            queue.push(task.id);
+                        requeued += 1;
+                    }
+                    else {
+                        await writeRun(task.id, {
                             ...run,
                             status: 'failed',
                             endedAt: run.endedAt ?? Date.now(),
-                            message: '运行中断（Host 或插件已重启）',
-                        },
-                    });
-                    repaired += 1;
-                }
-                catch (error) {
-                    ctx.logger?.warn?.(`[task-center] 清理中断运行失败：${describe(error)}`);
+                            message: '排队已取消（Host 重启时自动开跑是关的）',
+                        });
+                        repaired += 1;
+                    }
                 }
             }
-            return { repaired };
+            void drain();
+            return { repaired, requeued };
         },
         dispose() {
             disposed = true;
+            for (const handle of timers.values())
+                clearTimeout(handle);
+            timers.clear();
+            queue.length = 0;
             sessionToTask.clear();
             taskToSession.clear();
         },
