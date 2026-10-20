@@ -123,6 +123,10 @@ window.__ModuleLoader__.load({
         'field.permission': '权限',
         permissionInherit: '跟随全局（{name}）',
         permissionHint: '只影响这个任务拉起的智能体',
+        'field.autoApprove': '自动批准',
+        autoApproveOn: '工作区内放行',
+        autoApproveOff: '每次都问我',
+        autoApproveHint: '只自动批准落在工作区目录里的工具调用，越界仍会弹给你',
         needWorkspace: '先选一个工作区，再建任务',
         targetWs: '新建到',
         noWorkspaceRun: '这个任务还没有工作区，先指定一个再开跑',
@@ -234,6 +238,10 @@ window.__ModuleLoader__.load({
         'field.permission': 'Permission',
         permissionInherit: 'Follow the global setting ({name})',
         permissionHint: 'Only affects agents started by this task',
+        'field.autoApprove': 'Auto-approve',
+        autoApproveOn: 'Allow inside the workspace',
+        autoApproveOff: 'Ask me every time',
+        autoApproveHint: 'Only tool calls that stay inside the workspace are approved automatically',
         needWorkspace: 'Pick a workspace before creating a task',
         targetWs: 'New task in',
         noWorkspaceRun: 'This task has no workspace yet — set one before running it',
@@ -743,6 +751,7 @@ window.__ModuleLoader__.load({
         permission: task.permission === null || task.permission === undefined ? '' : task.permission,
         cwd: task.cwd === null || task.cwd === undefined ? '' : task.cwd,
         blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy.slice() : [],
+        autoApprove: task.autoApprove === true,
       }))
       const [dirDraft, setDirDraft] = useState('')
       const [dirBusy, setDirBusy] = useState(false)
@@ -805,7 +814,7 @@ window.__ModuleLoader__.load({
           const next = Object.assign({}, previous, patch)
           const chosen = workspaces.find((entry) => entry.id === next.workspaceId)
           const storedPath = next.workspacePath !== '' ? next.workspacePath : chosen === undefined ? '' : chosen.path
-          const payload: Omit<TaskUpdateInput, 'id'> = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: next.workspaceId === '' || storedPath === '' ? null : storedPath, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim(), blockedBy: next.blockedBy }
+          const payload: Omit<TaskUpdateInput, 'id'> = { notes: next.notes, status: next.status, priority: next.priority, due: next.due === '' ? null : next.due, tags: splitTags(next.tags), workspaceId: next.workspaceId === '' ? null : next.workspaceId, workspacePath: next.workspaceId === '' || storedPath === '' ? null : storedPath, permission: next.permission === '' ? null : next.permission, cwd: next.cwd.trim() === '' ? null : next.cwd.trim(), blockedBy: next.blockedBy, autoApprove: next.autoApprove === true }
           if (next.title.trim() !== '') payload.title = next.title.trim()
           pendingRef.current = payload
           return next
@@ -1012,6 +1021,24 @@ window.__ModuleLoader__.load({
                   .map((option) => h('option', { key: option.value, value: option.value }, option.name)),
               ),
               h('span', { className: 'tc-fieldhint' }, t('permissionHint')),
+            ),
+            h(
+              'label',
+              { className: 'tc-field' },
+              h('span', { className: 'tc-label' }, t('field.autoApprove')),
+              h(
+                'label',
+                { className: 'tc-switch' },
+                h('input', {
+                  type: 'checkbox',
+                  className: 'tc-switch-check',
+                  checked: form.autoApprove,
+                  onChange: (event) => stage({ autoApprove: event.target.checked }),
+                }),
+                h('span', { className: 'tc-switch-track' }, h('span', { className: 'tc-switch-dot' })),
+                h('span', { className: 'tc-switch-text' }, form.autoApprove ? t('autoApproveOn') : t('autoApproveOff')),
+              ),
+              h('span', { className: 'tc-fieldhint' }, t('autoApproveHint')),
             ),
           ),
           h(
@@ -2008,6 +2035,15 @@ window.__ModuleLoader__.load({
 .tc-field-half{flex:1 1 0;min-width:0}
 .tc-label{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary)}
 .tc-fieldhint{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);opacity:.8}
+.tc-switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.tc-switch-check{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.tc-switch-track{position:relative;flex:0 0 auto;width:34px;height:20px;border-radius:999px;background:var(--dsw-alias-border-l2);transition:background .15s ease}
+.tc-switch-dot{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-layer-1);transition:transform .15s ease}
+.tc-switch-check:checked+.tc-switch-track{background:var(--dsw-alias-brand-primary)}
+.tc-switch-check:checked+.tc-switch-track .tc-switch-dot{transform:translateX(14px)}
+.tc-switch-check:focus-visible+.tc-switch-track{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}
+.tc-switch-text{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary)}
+.tc-switch-check:checked~.tc-switch-text{color:var(--dsw-alias-label-primary)}
 .tc-blockers{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
 .tc-blocker{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);cursor:pointer;border:1px solid transparent}
 .tc-blocker:hover{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 7%,transparent)}

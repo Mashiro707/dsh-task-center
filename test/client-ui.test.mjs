@@ -70,6 +70,7 @@ test('every requested visual affordance is present', () => {
     ['auto-run switch', /\.tc-toggle-on\{/],
     ['workspace chip', /\.tc-ws\{[^}]*border-radius/],
     ['inline directory row', /\.tc-inline\{[^}]*display:flex/],
+    ['auto-approve switch', /\.tc-switch-track\{[^}]*border-radius:999px/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
 })

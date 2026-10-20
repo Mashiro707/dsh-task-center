@@ -79,8 +79,9 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 - **收尾**：agent 空闲即视为做完，任务留「进行中」等你验收；agent 报错则记 `failed`，原因写进 `run.message`
 - **中断恢复**：插件或宿主重启时，还在 `running` 的行会被标成「运行中断」；`queued` 的行在自动开跑关着时被取消，不会假装还在跑
 - **权限回落**：任务没指定预设时用全局预设（默认 `auto`：逐次调用复核，最接近无人值守）；预设不存在时只记一条 warn，不阻断开跑
+- **工作区内自动批准**：任务带工作区时默认打开（抽屉里可关）。插件订阅宿主的 `approval/request` 瀑布事件，只对**自己拉起的会话**生效；它把这次工具调用的参数从会话日志里读回来（`session/event` 的 `tool/call`），只要参数里出现的绝对路径都在该工作区目录内、且不含 `..` 与 `~`，就直接回 `allowed-once`；一旦越界就调 `next()`，原样交给页面上的审批面板问你。沙箱模式仍然照常生效，所以放行不等于越权。
 
-任务多了五个字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）、`blockedBy`（前置任务 id）与 `run`（`{sessionId, status: queued|running|done|failed, startedAt, endedAt, message, attempts}`）。
+任务多了六个字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）、`blockedBy`（前置任务 id）、`autoApprove`（工作区内自动批准）与 `run`（`{sessionId, status: queued|running|done|failed, startedAt, endedAt, message, attempts}`）。
 
 ### agent 工具
 

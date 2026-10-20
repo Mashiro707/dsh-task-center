@@ -270,6 +270,8 @@ function normalizeRecord(raw) {
     const priority = PRIORITIES.includes(raw.priority) ? raw.priority : 'normal';
     const due = typeof raw.due === 'string' && DUE_PATTERN.test(raw.due) ? raw.due : null;
     const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now();
+    const workspaceId = cleanText(raw.workspaceId);
+    const workspacePath = cleanCwd(raw.workspacePath);
     return {
         id,
         title,
@@ -278,11 +280,12 @@ function normalizeRecord(raw) {
         priority,
         due,
         tags: Array.isArray(raw.tags) ? raw.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '') : [],
-        workspaceId: cleanText(raw.workspaceId),
-        workspacePath: cleanCwd(raw.workspacePath),
+        workspaceId,
+        workspacePath,
         permission: cleanText(raw.permission),
         cwd: cleanCwd(raw.cwd),
         blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
+        autoApprove: raw.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : raw.autoApprove === true,
         run: normalizeRun(raw.run),
         parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
         createdAt,
@@ -471,6 +474,8 @@ export function createTaskStore(options = {}) {
                     parentId = parent.id;
                 }
                 const status = input.status === undefined ? 'todo' : cleanStatus(input.status);
+                const workspaceId = cleanText(input.workspaceId);
+                const workspacePath = cleanCwd(input.workspacePath);
                 const record = {
                     id: `t_${now.toString(36)}_${randomUUID().slice(0, 8)}`,
                     title: cleanTitle(input.title),
@@ -479,11 +484,12 @@ export function createTaskStore(options = {}) {
                     priority: input.priority === undefined ? 'normal' : cleanPriority(input.priority),
                     due: cleanDue(input.due),
                     tags: cleanTags(input.tags),
-                    workspaceId: cleanText(input.workspaceId),
-                    workspacePath: cleanCwd(input.workspacePath),
+                    workspaceId,
+                    workspacePath,
                     permission: cleanText(input.permission),
                     cwd: cleanCwd(input.cwd),
                     blockedBy: cleanIdList(input.blockedBy),
+                    autoApprove: input.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : input.autoApprove === true,
                     run: null,
                     parentId,
                     createdAt: now,
@@ -525,6 +531,8 @@ export function createTaskStore(options = {}) {
                 if (input.blockedBy !== undefined) {
                     record.blockedBy = cleanIdList(input.blockedBy).filter(entry => entry !== record.id);
                 }
+                if (input.autoApprove !== undefined)
+                    record.autoApprove = input.autoApprove === true;
                 if (input.run !== undefined)
                     record.run = normalizeRun(input.run);
                 if (input.status !== undefined) {
@@ -774,6 +782,10 @@ function publishTools(ctx, store) {
                     items: { type: 'string' },
                     description: 'Ids of tasks that must be done before this one may run.',
                 },
+                auto_approve: {
+                    type: 'boolean',
+                    description: 'Answer in-workspace approvals without asking the user. Defaults to true when the task has a workspace.',
+                },
             },
             required: ['title'],
             additionalProperties: false,
@@ -790,6 +802,7 @@ function publishTools(ctx, store) {
             workspaceId: args?.workspace_id,
             permission: args?.permission,
             blockedBy: args?.blocked_by,
+            autoApprove: args?.auto_approve,
         }),
     });
     add({
@@ -813,6 +826,10 @@ function publishTools(ctx, store) {
                     items: { type: 'string' },
                     description: 'Ids of tasks that must be done before this one may run; an empty array clears them.',
                 },
+                auto_approve: {
+                    type: 'boolean',
+                    description: 'Answer in-workspace approvals without asking the user.',
+                },
             },
             required: ['id'],
             additionalProperties: false,
@@ -830,6 +847,7 @@ function publishTools(ctx, store) {
             workspaceId: args?.workspace_id,
             permission: args?.permission,
             blockedBy: args?.blocked_by,
+            autoApprove: args?.auto_approve,
         }),
     });
     add({

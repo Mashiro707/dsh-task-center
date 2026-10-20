@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-20
+
+### Added
+
+- In-workspace auto-approval (`autoApprove`, on by default when the task has a
+  workspace). The plugin listens on the host's `approval/request` waterfall and
+  answers `allowed-once` only for sessions it started itself, and only when
+  every absolute path in the tool call resolves inside that task's workspace and
+  the call contains no `..` or `~`. Anything else falls through to `next()`, so
+  the page still asks you. The sandbox mode keeps applying either way.
+- An auto-approval switch in the drawer, and `auto_approve` on `task_create` /
+  `task_update`.
+
 ## [1.3.0] - 2026-10-20
 
 ### Added

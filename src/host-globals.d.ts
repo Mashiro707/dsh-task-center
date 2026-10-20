@@ -106,6 +106,37 @@ interface HostPermissionPresets {
   resolve(name: string): { sandbox?: string; approval?: string } | undefined
 }
 
+/** One `tool/call` entry as the session log records it. */
+interface HostToolCallEvent {
+  type: 'tool/call'
+  data?: {
+    turn?: number
+    step?: number
+    callId?: string
+    name?: string
+    arguments?: unknown
+  }
+}
+
+/** Any other session-log entry; only `type` is read. */
+interface HostSessionEvent {
+  type: string
+  data?: unknown
+}
+
+/** One approval the tool pipeline wants answered. */
+interface HostApprovalRequest {
+  agent: HostAgent
+  toolName: string
+  callId?: string
+  reason?: string
+  displayReason?: unknown
+  signal?: AbortSignal
+}
+
+/** What an approval answerer may return. */
+type HostApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+
 /** The Cordis context handed to `apply`. */
 interface HostContext {
   webServer: HostWebServer
@@ -115,5 +146,5 @@ interface HostContext {
   /** Resolve one optional host service by name; undefined when not composed. */
   get?<T = unknown>(service: string): T | undefined
   /** Subscribe to one host event; the subscription dies with the context. */
-  on(event: string, listener: (...args: never[]) => void): HostDisposer | void
+  on(event: string, listener: (...args: any[]) => unknown): HostDisposer | void
 }

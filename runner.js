@@ -168,6 +168,82 @@ function pendingBlockers(task, board) {
     return found;
 }
 /**
+ * Normalize a directory the way Windows compares paths.
+ * @param {string} value - some path.
+ * @returns {string} lower-cased, forward-slashed, without a trailing slash.
+ */
+function normalizePath(value) {
+    return value.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+/**
+ * Whether one path stays inside a directory.
+ * @param {string} candidate - the path to test.
+ * @param {string} root - the workspace directory.
+ * @returns {boolean} true when the path is the root or below it.
+ */
+function isInsideRoot(candidate, root) {
+    const target = normalizePath(candidate);
+    if (target === '')
+        return true;
+    const base = normalizePath(root);
+    if (base === '')
+        return false;
+    if (target === base)
+        return true;
+    return target.startsWith(`${base}/`);
+}
+/**
+ * Flatten one argument tree into the text the path scan reads.
+ * @param {unknown} args - the tool-call arguments.
+ * @returns {string} JSON or the raw string.
+ */
+function serializeArgs(args) {
+    try {
+        return typeof args === 'string' ? args : JSON.stringify(args);
+    }
+    catch {
+        return '~';
+    }
+}
+/**
+ * Pull every absolute path out of one argument tree.
+ *
+ * The regexes only claim tokens that look like a filesystem path, so URLs,
+ * flags and plain words stay out.
+ * @param {string} text - serialized arguments.
+ * @returns {string[]} absolute paths.
+ */
+function collectPaths(text) {
+    const found = [];
+    const windows = /(?:^|[\s"'(=,;])([A-Za-z]:[\\/][^\s"',;|&=<>]*)/g;
+    for (const match of text.matchAll(windows))
+        found.push(match[1]);
+    const posix = /(?:^|[\s"'(=,;])(\/(?!\/)[^\s"',;|&=<>]*)/g;
+    for (const match of text.matchAll(posix))
+        found.push(match[1]);
+    return found;
+}
+/**
+ * Decide whether one tool call stays inside the task's workspace.
+ * @param {unknown} args - the tool-call arguments.
+ * @param {string} root - the workspace directory.
+ * @returns {'inside' | 'outside' | 'unknown'} the verdict.
+ */
+function classifyCall(args, root) {
+    if (normalizePath(root) === '')
+        return 'unknown';
+    const text = serializeArgs(args);
+    if (/(?:^|[\s"'(=,;])~(?:\/|\\|\s|$)/.test(text))
+        return 'outside';
+    if (/(?:^|[\\/\s"'=;])\.\.(?:[\\/]|[\s"'=;&|)]|$)/.test(text))
+        return 'outside';
+    for (const path of collectPaths(text)) {
+        if (!isInsideRoot(path, root))
+            return 'outside';
+    }
+    return 'inside';
+}
+/**
  * Build one runner bound to a store and the live host context.
  * @param {HostContext} ctx - host context.
  * @param {RunnerStore} store - the shared store.
@@ -183,6 +259,8 @@ export function createRunner(ctx, store) {
     const queue = [];
     /** taskId -> timeout handle for the current attempt. */
     const timers = new Map();
+    /** callId -> the call that is waiting for an approval answer. */
+    const pendingCalls = new Map();
     let settings = null;
     let disposed = false;
     let draining = false;
@@ -262,6 +340,10 @@ export function createRunner(ctx, store) {
             return;
         sessionToTask.delete(sessionId);
         taskToSession.delete(taskId);
+        for (const [callId, call] of pendingCalls) {
+            if (call.taskId === taskId)
+                pendingCalls.delete(callId);
+        }
         const timer = timers.get(taskId);
         if (timer !== undefined) {
             clearTimeout(timer);
@@ -591,6 +673,62 @@ export function createRunner(ctx, store) {
             return;
         void settle(taskId, payload.agent.id, 'failed', '会话已结束');
     });
+    // Remember what each call asked for: the approval request carries only the
+    // call id, so the arguments are read back from the session log.
+    ctx.on('session/event', (session, event) => {
+        if (event.type !== 'tool/call')
+            return;
+        const data = (event.data ?? {});
+        const callId = typeof data?.callId === 'string' ? data.callId : '';
+        if (callId === '')
+            return;
+        const taskId = sessionToTask.get(session.id);
+        if (taskId === undefined)
+            return;
+        pendingCalls.set(callId, {
+            taskId,
+            name: typeof data?.name === 'string' ? data.name : '',
+            args: data?.arguments,
+        });
+        while (pendingCalls.size > 256) {
+            const oldest = pendingCalls.keys().next();
+            if (oldest.done === true)
+                break;
+            pendingCalls.delete(oldest.value);
+        }
+    });
+    // Answer approvals for this runner's own runs, but only while the call stays
+    // inside the task's workspace. Everything else falls through to the user.
+    ctx.on('approval/request', (request, next) => {
+        const taskId = sessionToTask.get(request.agent?.id ?? '');
+        if (taskId === undefined)
+            return next();
+        return (async () => {
+            try {
+                const board = await store.list();
+                const task = board.tasks.find(entry => entry.id === taskId);
+                if (task === undefined || task.autoApprove !== true)
+                    return await next();
+                const root = (task.workspacePath ?? task.cwd ?? '').trim();
+                if (root === '')
+                    return await next();
+                const call = request.callId === undefined ? undefined : pendingCalls.get(request.callId);
+                if (call === undefined)
+                    return await next();
+                const verdict = classifyCall(call.args, root);
+                if (verdict !== 'inside') {
+                    ctx.logger?.info?.(`[task-center] ${request.toolName} 越过工作区，交给你确认。`);
+                    return await next();
+                }
+                ctx.logger?.info?.(`[task-center] 工作区内自动批准 ${request.toolName}（任务 ${taskId}）。`);
+                return 'allowed-once';
+            }
+            catch (error) {
+                ctx.logger?.warn?.(`[task-center] 自动批准判断失败，交给用户：${describe(error)}`);
+                return await next();
+            }
+        })();
+    });
     return {
         start,
         async cancel(taskId) {
@@ -684,6 +822,7 @@ export function createRunner(ctx, store) {
                 clearTimeout(handle);
             timers.clear();
             queue.length = 0;
+            pendingCalls.clear();
             sessionToTask.clear();
             taskToSession.clear();
         },

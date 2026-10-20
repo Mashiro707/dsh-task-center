@@ -310,6 +310,8 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
   const priority: TaskPriority = PRIORITIES.includes(raw.priority as TaskPriority) ? (raw.priority as TaskPriority) : 'normal'
   const due = typeof raw.due === 'string' && DUE_PATTERN.test(raw.due) ? raw.due : null
   const createdAt = Number.isFinite(raw.createdAt) ? (raw.createdAt as number) : Date.now()
+  const workspaceId = cleanText(raw.workspaceId)
+  const workspacePath = cleanCwd(raw.workspacePath)
   return {
     id,
     title,
@@ -318,11 +320,12 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     priority,
     due,
     tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim() !== '') : [],
-    workspaceId: cleanText(raw.workspaceId),
-    workspacePath: cleanCwd(raw.workspacePath),
+    workspaceId,
+    workspacePath,
     permission: cleanText(raw.permission),
     cwd: cleanCwd(raw.cwd),
     blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
+    autoApprove: raw.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : raw.autoApprove === true,
     run: normalizeRun(raw.run),
     parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
     createdAt,
@@ -514,6 +517,8 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           parentId = parent.id
         }
         const status: TaskStatus = input.status === undefined ? 'todo' : cleanStatus(input.status)
+        const workspaceId = cleanText(input.workspaceId)
+        const workspacePath = cleanCwd(input.workspacePath)
         const record: TaskRecord = {
           id: `t_${now.toString(36)}_${randomUUID().slice(0, 8)}`,
           title: cleanTitle(input.title),
@@ -522,11 +527,12 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           priority: input.priority === undefined ? 'normal' : cleanPriority(input.priority),
           due: cleanDue(input.due),
           tags: cleanTags(input.tags),
-          workspaceId: cleanText(input.workspaceId),
-          workspacePath: cleanCwd(input.workspacePath),
+          workspaceId,
+          workspacePath,
           permission: cleanText(input.permission),
           cwd: cleanCwd(input.cwd),
           blockedBy: cleanIdList(input.blockedBy),
+          autoApprove: input.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : input.autoApprove === true,
           run: null,
           parentId,
           createdAt: now,
@@ -560,6 +566,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
         if (input.blockedBy !== undefined) {
           record.blockedBy = cleanIdList(input.blockedBy).filter(entry => entry !== record.id)
         }
+        if (input.autoApprove !== undefined) record.autoApprove = input.autoApprove === true
         if (input.run !== undefined) record.run = normalizeRun(input.run)
         if (input.status !== undefined) {
           const status = cleanStatus(input.status)
@@ -803,6 +810,10 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
           items: { type: 'string' },
           description: 'Ids of tasks that must be done before this one may run.',
         },
+        auto_approve: {
+          type: 'boolean',
+          description: 'Answer in-workspace approvals without asking the user. Defaults to true when the task has a workspace.',
+        },
       },
       required: ['title'],
       additionalProperties: false,
@@ -820,6 +831,7 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         workspaceId: args?.workspace_id,
         permission: args?.permission,
         blockedBy: args?.blocked_by,
+        autoApprove: args?.auto_approve,
       }),
   })
 
@@ -845,6 +857,10 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
           items: { type: 'string' },
           description: 'Ids of tasks that must be done before this one may run; an empty array clears them.',
         },
+        auto_approve: {
+          type: 'boolean',
+          description: 'Answer in-workspace approvals without asking the user.',
+        },
       },
       required: ['id'],
       additionalProperties: false,
@@ -863,6 +879,7 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         workspaceId: args?.workspace_id,
         permission: args?.permission,
         blockedBy: args?.blocked_by,
+        autoApprove: args?.auto_approve,
       }),
   })
 

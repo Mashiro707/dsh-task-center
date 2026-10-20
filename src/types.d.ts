@@ -52,6 +52,8 @@ interface TaskRecord {
   run: TaskRun | null
   /** Ids of tasks that must reach `done` before this one may run. */
   blockedBy: string[]
+  /** Answer this task's in-workspace approvals without asking the user. */
+  autoApprove: boolean
   /** Parent task id; subtasks are exactly one level deep. */
   parentId: string | null
   createdAt: number
@@ -76,6 +78,7 @@ interface TaskCreateInput {
   permission?: string | null
   cwd?: string | null
   blockedBy?: string[]
+  autoApprove?: boolean
 }
 
 /** Fields accepted when updating a task; only what is present is applied. */
@@ -93,6 +96,7 @@ interface TaskUpdateInput {
   permission?: string | null
   cwd?: string | null
   blockedBy?: string[]
+  autoApprove?: boolean
   /** Written by the runner only, never by a caller patching content. */
   run?: TaskRun | null
 }

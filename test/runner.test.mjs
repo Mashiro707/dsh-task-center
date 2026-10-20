@@ -84,8 +84,13 @@ function makeHost(options = {}) {
     created,
     installed,
     agents,
-    emit(event, payload) {
-      for (const listener of listeners.get(event) || []) listener(payload)
+    emit(event, ...args) {
+      for (const listener of listeners.get(event) || []) listener(...args)
+    },
+    async emitAsync(event, ...args) {
+      const results = []
+      for (const listener of listeners.get(event) || []) results.push(await listener(...args))
+      return results
     },
   }
 }
@@ -688,6 +693,128 @@ test('a task waits for its blockers and starts when they finish', async () => {
     })
     assert.equal(started.run.sessionId, 'session-1')
     assert.equal(started.blockedBy.length, 1)
+  } finally {
+    await dispose()
+  }
+})
+
+test('an approval that stays inside the workspace is answered without the user', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '改代码', workspaceId: 'ws-1', workspacePath: 'C:/work/app' })
+    const run = await runner.start(task.id)
+    assert.equal(run.autoApprove, true)
+
+    host.emit('session/event', { id: run.run.sessionId }, {
+      type: 'tool/call',
+      data: { callId: 'call-inside', name: 'write', arguments: { path: 'C:/work/app/src/a.ts' } },
+    })
+    host.emit('session/event', { id: run.run.sessionId }, {
+      type: 'tool/call',
+      data: { callId: 'call-relative', name: 'bash', arguments: { command: 'npm test' } },
+    })
+
+    let asked = false
+    const next = async () => {
+      asked = true
+      return 'unavailable'
+    }
+    const inside = await host.emitAsync(
+      'approval/request',
+      { agent: { id: run.run.sessionId }, toolName: 'write', callId: 'call-inside' },
+      next,
+    )
+    assert.deepEqual(inside, ['allowed-once'])
+    const relative = await host.emitAsync(
+      'approval/request',
+      { agent: { id: run.run.sessionId }, toolName: 'bash', callId: 'call-relative' },
+      next,
+    )
+    assert.deepEqual(relative, ['allowed-once'])
+    assert.equal(asked, false)
+  } finally {
+    await dispose()
+  }
+})
+
+test('an approval that leaves the workspace still goes to the user', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '越界', workspaceId: 'ws-1', workspacePath: 'C:/work/app' })
+    const run = await runner.start(task.id)
+
+    for (const [callId, args] of [
+      ['call-outside', { path: 'C:/windows/system32/config' }],
+      ['call-parent', { command: 'cd .. && rm -rf app' }],
+      ['call-home', { command: 'ls ~/secrets' }],
+    ]) {
+      host.emit('session/event', { id: run.run.sessionId }, { type: 'tool/call', data: { callId, name: 'bash', arguments: args } })
+      let asked = false
+      const results = await host.emitAsync(
+        'approval/request',
+        { agent: { id: run.run.sessionId }, toolName: 'bash', callId },
+        async () => {
+          asked = true
+          return 'unavailable'
+        },
+      )
+      assert.deepEqual(results, ['unavailable'])
+      assert.equal(asked, true)
+    }
+  } finally {
+    await dispose()
+  }
+})
+
+test('auto approve can be turned off per task', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '手动', workspaceId: 'ws-1', workspacePath: 'C:/work/app', autoApprove: false })
+    const run = await runner.start(task.id)
+    assert.equal(run.autoApprove, false)
+
+    host.emit('session/event', { id: run.run.sessionId }, {
+      type: 'tool/call',
+      data: { callId: 'call-1', name: 'write', arguments: { path: 'C:/work/app/a.ts' } },
+    })
+    let asked = false
+    const results = await host.emitAsync(
+      'approval/request',
+      { agent: { id: run.run.sessionId }, toolName: 'write', callId: 'call-1' },
+      async () => {
+        asked = true
+        return 'unavailable'
+      },
+    )
+    assert.deepEqual(results, ['unavailable'])
+    assert.equal(asked, true)
+  } finally {
+    await dispose()
+  }
+})
+
+test('an approval for a session this runner does not own falls through', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    createRunner(host.ctx, store)
+    let asked = false
+    const results = await host.emitAsync(
+      'approval/request',
+      { agent: { id: 'session-someone-else' }, toolName: 'bash', callId: 'call-x' },
+      async () => {
+        asked = true
+        return 'unavailable'
+      },
+    )
+    assert.deepEqual(results, ['unavailable'])
+    assert.equal(asked, true)
   } finally {
     await dispose()
   }
