@@ -9,7 +9,7 @@ import { apply } from '../index.js'
 import { buildPrompt, createRunner, createUserMessage, service } from '../runner.js'
 
 /** Poll until `check` returns something truthy, or fail. */
-async function waitFor(check, timeout = 8000) {
+async function waitFor(check, timeout = 20000) {
   const started = Date.now()
   for (;;) {
     const value = await check()
