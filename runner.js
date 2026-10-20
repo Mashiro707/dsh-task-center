@@ -257,12 +257,16 @@ export function createRunner(ctx, store) {
     const taskToSession = new Map();
     /** Task ids waiting for a slot, in start order. */
     const queue = [];
+    /** Task ids whose session is being created right now. */
+    const starting = new Set();
+    /** Task ids cancelled while `starting`, to be stopped once a session exists. */
+    const stopping = new Set();
     /** taskId -> timeout handle for the current attempt. */
     const timers = new Map();
     /** callId -> the call that is waiting for an approval answer. */
     const pendingCalls = new Map();
     let settings = null;
-    const approvals = { approved: 0, delegated: 0 };
+    const approvals = { approved: 0, delegated: 0, seen: 0 };
     let disposed = false;
     let draining = false;
     /**
@@ -341,6 +345,7 @@ export function createRunner(ctx, store) {
             return;
         sessionToTask.delete(sessionId);
         taskToSession.delete(taskId);
+        stopping.delete(taskId);
         for (const [callId, call] of pendingCalls) {
             if (call.taskId === taskId)
                 pendingCalls.delete(callId);
@@ -424,12 +429,27 @@ export function createRunner(ctx, store) {
         timers.set(taskId, handle);
     }
     /**
-     * Create the session and admit the prompt for one attempt.
+     * Admit one attempt, unless a cancel landed while its session was created.
      * @param {TaskRecord} task - the task to run.
      * @param {TaskRecord[]} board - every live task, for the prompt.
      * @returns {Promise<TaskRecord>} the task, now in `doing` with a live run.
      */
     async function launch(task, board) {
+        starting.add(task.id);
+        try {
+            return await admit(task, board);
+        }
+        finally {
+            starting.delete(task.id);
+        }
+    }
+    /**
+     * Create the session and hand it the prompt.
+     * @param {TaskRecord} task - the task to run.
+     * @param {TaskRecord[]} board - every live task, for the prompt.
+     * @returns {Promise<TaskRecord>} the task, now in `doing` with a live run.
+     */
+    async function admit(task, board) {
         const controller = service(ctx, 'sessionController');
         if (controller === undefined) {
             throw runnerError('unavailable', '当前 Host 没有会话服务，没法拉起智能体。');
@@ -440,6 +460,22 @@ export function createRunner(ctx, store) {
         const attempt = (task.run?.attempts ?? 0) + 1;
         // Exactly one of the two: the Host rejects a request naming both.
         const created = await controller.create(workspaceId === '' ? { cwd } : { workspaceId });
+        // A cancel that landed while the session was being created wins: stop the
+        // session we just made instead of handing it a prompt it should not run.
+        if (stopping.delete(task.id)) {
+            cancelSession(created.sessionId);
+            return store.update({
+                id: task.id,
+                run: {
+                    sessionId: created.sessionId,
+                    status: 'failed',
+                    startedAt: Date.now(),
+                    endedAt: Date.now(),
+                    message: '已取消',
+                    attempts: attempt,
+                },
+            });
+        }
         const resolved = await controller.resolveAgent(created.sessionId);
         if (resolved.agent === undefined) {
             throw runnerError('unavailable', `会话 ${created.sessionId} 建好后拿不到智能体：${describe(resolved.error)}`);
@@ -562,6 +598,7 @@ export function createRunner(ctx, store) {
     async function start(taskId) {
         if (disposed)
             throw runnerError('unavailable', '任务中心已经卸载，无法开跑。');
+        stopping.delete(taskId);
         const controller = service(ctx, 'sessionController');
         if (controller === undefined) {
             throw runnerError('unavailable', '当前 Host 没有会话服务，没法拉起智能体。');
@@ -732,6 +769,9 @@ export function createRunner(ctx, store) {
         const taskId = sessionToTask.get(request.agent?.id ?? '');
         if (taskId === undefined)
             return next();
+        // Counted even when we refuse to decide: a rising `autoSeen` proves the
+        // gate is reached at all, which is what a silent panel cannot tell us.
+        approvals.seen += 1;
         return (async () => {
             try {
                 const board = await store.list();
@@ -781,8 +821,14 @@ export function createRunner(ctx, store) {
                 return { canceled: true };
             }
             const sessionId = taskToSession.get(taskId);
-            if (sessionId === undefined)
+            if (sessionId === undefined) {
+                // The session is still being created: flag the task so `admit` stops it.
+                if (starting.has(taskId)) {
+                    stopping.add(taskId);
+                    return { canceled: true };
+                }
                 return { canceled: false };
+            }
             cancelSession(sessionId);
             await settle(taskId, sessionId, 'failed', '已取消');
             return { canceled: true };
@@ -793,7 +839,11 @@ export function createRunner(ctx, store) {
         },
         settings: readSettings,
         stats() {
-            return { autoApproved: approvals.approved, autoDelegated: approvals.delegated };
+            return {
+                autoApproved: approvals.approved,
+                autoDelegated: approvals.delegated,
+                autoSeen: approvals.seen,
+            };
         },
         async saveSettings(patch = {}) {
             const current = await readSettings();

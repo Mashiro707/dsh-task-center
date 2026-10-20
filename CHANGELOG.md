@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-10-20
+
+### Fixed
+
+- A cancel that lands while the attempt's session is still being created is no
+  longer lost. The task is flagged and the session is stopped as soon as it
+  exists, instead of running the prompt the user already cancelled.
+
+### Added
+
+- `autoSeen` in the settings response: how many approval requests reached the
+  gate at all. Without it, `autoApproved: 0` cannot be told apart from the gate
+  never being consulted.
+
 ## [1.4.0] - 2026-10-20
 
 ### Added

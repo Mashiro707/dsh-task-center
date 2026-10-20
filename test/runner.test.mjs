@@ -30,6 +30,8 @@ function makeHost(options = {}) {
   const controller = {
     async create(request) {
       created.push(request)
+      // Optional gate: lets a test observe the window before the session exists.
+      if (options.gate !== undefined) await options.gate
       const id = 'session-' + created.length
       const agent = {
         id,
@@ -295,6 +297,36 @@ test('cancelling a run stops its session and closes the row', async () => {
     assert.equal(row.run.message, '已取消')
     // Cancelling twice is a no-op, not an error.
     assert.deepEqual(await runner.cancel(task.id), { canceled: false })
+  } finally {
+    await dispose()
+  }
+})
+
+test('a cancel that lands mid-launch still stops the session', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    // Hold `create` open so the test can cancel in that exact window.
+    let release
+    const gate = new Promise((resolve) => {
+      release = resolve
+    })
+    const host = makeHost({ gate })
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '抢跑', cwd: 'C:/work/app' })
+
+    const started = runner.start(task.id)
+    // Give `start` a tick to reach `create`, then cancel before it resolves.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.deepEqual(await runner.cancel(task.id), { canceled: true })
+    release()
+    await started
+
+    assert.equal(host.agents.get('session-1').status, 'cancelled')
+    const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+    assert.equal(row.run.status, 'failed')
+    assert.equal(row.run.message, '已取消')
+    assert.equal(host.agents.get('session-1').inbox.length, 0, 'the prompt must not be delivered')
+    assert.deepEqual((await runner.queue()).queued, [])
   } finally {
     await dispose()
   }
@@ -737,6 +769,7 @@ test('an approval that stays inside the workspace is answered without the user',
     const stats = runner.stats()
     assert.equal(stats.autoApproved, 2, 'both in-workspace approvals are counted')
     assert.equal(stats.autoDelegated, 0)
+    assert.equal(stats.autoSeen, 2, 'every request for our own session is counted')
   } finally {
     await dispose()
   }
@@ -809,7 +842,7 @@ test('an approval for a session this runner does not own falls through', async (
   const { store, dispose } = await makeStore()
   try {
     const host = makeHost()
-    createRunner(host.ctx, store)
+    const runner = createRunner(host.ctx, store)
     let asked = false
     const results = await host.emitAsync(
       'approval/request',
@@ -821,6 +854,7 @@ test('an approval for a session this runner does not own falls through', async (
     )
     assert.deepEqual(results, ['unavailable'])
     assert.equal(asked, true)
+    assert.equal(runner.stats().autoSeen, 0, 'a foreign session must not be counted')
   } finally {
     await dispose()
   }
