@@ -27,7 +27,21 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          set +e
+          npm test > test-output.log 2>&1
+          status=$?
+          if [ $status -ne 0 ]; then
+            # Surface the failing assertions as check annotations, which stay
+            # readable through the API even when the raw log cannot be opened.
+            grep -E "^(not ok|✖)|AssertionError|Error:|timed out" test-output.log | head -40 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line//'%'/'%25'}"
+            done
+            tail -80 test-output.log
+            exit $status
+          fi
+          cat test-output.log
 
       - name: Fail if committed artifacts are stale
         run: git diff --exit-code -- index.js runner.js client.js
