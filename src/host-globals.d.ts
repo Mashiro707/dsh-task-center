@@ -146,5 +146,9 @@ interface HostContext {
   /** Resolve one optional host service by name; undefined when not composed. */
   get?<T = unknown>(service: string): T | undefined
   /** Subscribe to one host event; the subscription dies with the context. */
-  on(event: string, listener: (...args: any[]) => unknown): HostDisposer | void
+  on(
+    event: string,
+    listener: (...args: any[]) => unknown,
+    options?: { global?: boolean },
+  ): HostDisposer | void
 }

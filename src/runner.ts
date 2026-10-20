@@ -812,33 +812,51 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     })()
   }
 
-  ctx.on('agent/status', (payload: { agent: HostAgent; status: string }) => {
+  // The host dispatches agent events through a scope, and a root listener does
+  // not always see them. Registering twice (plain and global) keeps one run
+  // from leaving the row stuck at "running" for a wiring reason.
+  function onAgentStatus(payload: { agent?: HostAgent; status?: string }, scope: string): void {
     diagnostics.statusEvents += 1
     if (diagnostics.statusEvents <= 6) {
-      diagnostics.statusSamples.push(
-        `${typeof payload?.agent?.id === 'string' ? payload.agent.id : 'no-agent'}:${String(payload?.status)}`,
-      )
+      const agentId = typeof payload?.agent?.id === 'string' ? payload.agent.id : 'no-agent'
+      diagnostics.statusSamples.push(`${scope}:${agentId}:${String(payload?.status)}`)
     }
-    const taskId = sessionToTask.get(payload?.agent?.id ?? '')
-    if (taskId === undefined || payload.status === 'running') return
-    void settle(taskId, payload.agent.id, 'done', null)
-  })
+    const sessionId = payload?.agent?.id ?? ''
+    const taskId = sessionToTask.get(sessionId)
+    if (taskId === undefined || payload?.status === 'running') return
+    void settle(taskId, sessionId, 'done', null)
+  }
 
-  ctx.on('agent/error', (payload: { agent: HostAgent; error: unknown }) => {
-    const taskId = sessionToTask.get(payload.agent.id)
+  function onAgentError(payload: { agent?: HostAgent; error?: unknown }, scope: string): void {
+    const sessionId = payload?.agent?.id ?? ''
+    const taskId = sessionToTask.get(sessionId)
+    note(`agent/error ${scope} ${sessionId === '' ? 'no-agent' : sessionId}`)
     if (taskId === undefined) return
-    void settle(taskId, payload.agent.id, 'failed', describe(payload.error), { retry: true })
-  })
+    void settle(taskId, sessionId, 'failed', describe(payload?.error), { retry: true })
+  }
 
-  ctx.on('agent/disposed', (payload: { agent: HostAgent }) => {
-    const taskId = sessionToTask.get(payload.agent.id)
+  function onAgentDisposed(payload: { agent?: HostAgent }, scope: string): void {
+    const sessionId = payload?.agent?.id ?? ''
+    const taskId = sessionToTask.get(sessionId)
+    note(`agent/disposed ${scope} ${sessionId === '' ? 'no-agent' : sessionId}`)
     if (taskId === undefined) return
-    void settle(taskId, payload.agent.id, 'failed', '会话已结束')
+    void settle(taskId, sessionId, 'failed', '会话已结束')
+  }
+
+  ctx.on('agent/status', (payload: { agent?: HostAgent; status?: string }) => onAgentStatus(payload, 'plain'))
+  ctx.on('agent/status', (payload: { agent?: HostAgent; status?: string }) => onAgentStatus(payload, 'global'), {
+    global: true,
   })
+  ctx.on('agent/error', (payload: { agent?: HostAgent; error?: unknown }) => onAgentError(payload, 'plain'))
+  ctx.on('agent/error', (payload: { agent?: HostAgent; error?: unknown }) => onAgentError(payload, 'global'), {
+    global: true,
+  })
+  ctx.on('agent/disposed', (payload: { agent?: HostAgent }) => onAgentDisposed(payload, 'plain'))
+  ctx.on('agent/disposed', (payload: { agent?: HostAgent }) => onAgentDisposed(payload, 'global'), { global: true })
 
   // Remember what each call asked for: the approval request carries only the
   // call id, so the arguments are read back from the session log.
-  ctx.on('session/event', (session: HostSession, event: HostSessionEvent) => {
+  function onSessionEvent(session: HostSession, event: HostSessionEvent): void {
     if (diagnostics.eventTypes.size < 64) {
       const key = String(event?.type ?? '?')
       diagnostics.eventTypes.set(key, (diagnostics.eventTypes.get(key) ?? 0) + 1)
@@ -860,7 +878,14 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       if (oldest.done === true) break
       pendingCalls.delete(oldest.value)
     }
-  })
+  }
+
+  ctx.on('session/event', (session: HostSession, event: HostSessionEvent) => onSessionEvent(session, event))
+  ctx.on(
+    'session/event',
+    (session: HostSession, event: HostSessionEvent) => onSessionEvent(session, event),
+    { global: true },
+  )
 
   // Answer approvals for this runner's own runs, but only while the call stays
   // inside the task's workspace. Everything else falls through to the user.

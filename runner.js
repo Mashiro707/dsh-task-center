@@ -741,31 +741,50 @@ export function createRunner(ctx, store) {
             }
         })();
     }
-    ctx.on('agent/status', (payload) => {
+    // The host dispatches agent events through a scope, and a root listener does
+    // not always see them. Registering twice (plain and global) keeps one run
+    // from leaving the row stuck at "running" for a wiring reason.
+    function onAgentStatus(payload, scope) {
         diagnostics.statusEvents += 1;
         if (diagnostics.statusEvents <= 6) {
-            diagnostics.statusSamples.push(`${typeof payload?.agent?.id === 'string' ? payload.agent.id : 'no-agent'}:${String(payload?.status)}`);
+            const agentId = typeof payload?.agent?.id === 'string' ? payload.agent.id : 'no-agent';
+            diagnostics.statusSamples.push(`${scope}:${agentId}:${String(payload?.status)}`);
         }
-        const taskId = sessionToTask.get(payload?.agent?.id ?? '');
-        if (taskId === undefined || payload.status === 'running')
+        const sessionId = payload?.agent?.id ?? '';
+        const taskId = sessionToTask.get(sessionId);
+        if (taskId === undefined || payload?.status === 'running')
             return;
-        void settle(taskId, payload.agent.id, 'done', null);
-    });
-    ctx.on('agent/error', (payload) => {
-        const taskId = sessionToTask.get(payload.agent.id);
+        void settle(taskId, sessionId, 'done', null);
+    }
+    function onAgentError(payload, scope) {
+        const sessionId = payload?.agent?.id ?? '';
+        const taskId = sessionToTask.get(sessionId);
+        note(`agent/error ${scope} ${sessionId === '' ? 'no-agent' : sessionId}`);
         if (taskId === undefined)
             return;
-        void settle(taskId, payload.agent.id, 'failed', describe(payload.error), { retry: true });
-    });
-    ctx.on('agent/disposed', (payload) => {
-        const taskId = sessionToTask.get(payload.agent.id);
+        void settle(taskId, sessionId, 'failed', describe(payload?.error), { retry: true });
+    }
+    function onAgentDisposed(payload, scope) {
+        const sessionId = payload?.agent?.id ?? '';
+        const taskId = sessionToTask.get(sessionId);
+        note(`agent/disposed ${scope} ${sessionId === '' ? 'no-agent' : sessionId}`);
         if (taskId === undefined)
             return;
-        void settle(taskId, payload.agent.id, 'failed', '会话已结束');
+        void settle(taskId, sessionId, 'failed', '会话已结束');
+    }
+    ctx.on('agent/status', (payload) => onAgentStatus(payload, 'plain'));
+    ctx.on('agent/status', (payload) => onAgentStatus(payload, 'global'), {
+        global: true,
     });
+    ctx.on('agent/error', (payload) => onAgentError(payload, 'plain'));
+    ctx.on('agent/error', (payload) => onAgentError(payload, 'global'), {
+        global: true,
+    });
+    ctx.on('agent/disposed', (payload) => onAgentDisposed(payload, 'plain'));
+    ctx.on('agent/disposed', (payload) => onAgentDisposed(payload, 'global'), { global: true });
     // Remember what each call asked for: the approval request carries only the
     // call id, so the arguments are read back from the session log.
-    ctx.on('session/event', (session, event) => {
+    function onSessionEvent(session, event) {
         if (diagnostics.eventTypes.size < 64) {
             const key = String(event?.type ?? '?');
             diagnostics.eventTypes.set(key, (diagnostics.eventTypes.get(key) ?? 0) + 1);
@@ -792,7 +811,9 @@ export function createRunner(ctx, store) {
                 break;
             pendingCalls.delete(oldest.value);
         }
-    });
+    }
+    ctx.on('session/event', (session, event) => onSessionEvent(session, event));
+    ctx.on('session/event', (session, event) => onSessionEvent(session, event), { global: true });
     // Answer approvals for this runner's own runs, but only while the call stays
     // inside the task's workspace. Everything else falls through to the user.
     ctx.on('approval/request', (request, next) => {
