@@ -37,6 +37,7 @@
   },
   "exports": {
     ".": "./index.js",
+    "./runner": "./runner.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
