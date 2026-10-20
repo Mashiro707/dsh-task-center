@@ -883,7 +883,7 @@ export function apply(ctx) {
         return { workspaces, available: true };
     }
     /**
-     * Register one directory as a Workspace, reusing it when it already exists.
+     * Register one directory as a Workspace and return it.
      * @param {Record<string, unknown>} input - `{path}`.
      * @returns {Promise<HostWorkspace>} the workspace.
      */

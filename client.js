@@ -705,6 +705,14 @@ window.__ModuleLoader__.load({
                 onClick: () => {
                     if (dirBusy || dirDraft.trim() === '')
                         return;
+                    // Reuse the workspace when the directory is already registered.
+                    const wanted = samePathKey(dirDraft.trim());
+                    const existing = workspaces.find((entry) => samePathKey(entry.path) === wanted);
+                    if (existing !== undefined) {
+                        setDirDraft('');
+                        stage({ workspaceId: existing.id, workspacePath: existing.path });
+                        return;
+                    }
                     setDirBusy(true);
                     Promise.resolve(props.onCreateWorkspace(dirDraft.trim())).then((created) => {
                         setDirBusy(false);
@@ -1222,6 +1230,10 @@ window.__ModuleLoader__.load({
                 }), notice === null
                 ? null
                 : h('div', { className: 'tc-notice' + (notice.kind === 'error' ? ' tc-notice-error' : '') }, notice.text));
+        }
+        /** Compare directories the way the desktop host does: case- and separator-insensitive. */
+        function samePathKey(path) {
+            return String(path).trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
         }
         function splitTags(raw) {
             return raw
