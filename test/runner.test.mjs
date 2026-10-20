@@ -392,6 +392,13 @@ test('the route dispatches run, settings and the delete alias', async () => {
     const deleted = await post('/delete', { id })
     assert.equal(deleted.status, 200)
     assert.equal((await post('/list', {})).value.tasks.some((task) => task.id === id), false)
+
+    // And `permanent` erases instead of parking the row in the recycle bin.
+    const second = await post('/create', { title: '彻底删除' })
+    await post('/delete', { id: second.value.id, permanent: true })
+    const board = (await post('/list', {})).value
+    assert.equal(board.tasks.some((task) => task.id === second.value.id), false)
+    assert.equal(board.trash.some((task) => task.id === second.value.id), false)
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previous

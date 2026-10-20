@@ -85,7 +85,7 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 
 | action | 作用 |
 | --- | --- |
-| `list` / `create` / `update` / `remove` / `delete`（`remove` 的别名）/ `restore` / `purge` / `emptyTrash` | 任务 CRUD 与回收站 |
+| `list` / `create` / `update` / `remove` / `delete`（`remove` 的别名）/ `restore` / `purge` / `emptyTrash` | 任务 CRUD 与回收站；`remove` / `delete` 传 `permanent: true` 时直接抹掉，不进回收站 |
 | `run` / `cancelRun` | 起一个 agent / 停止它 |
 | `settings` / `saveSettings` | 读/写 `{autoRun, concurrency, preset}`，`settings` 另回 `available`（宿主有没有会话服务） |
 

@@ -843,13 +843,25 @@ export function apply(ctx: HostContext): void {
     },
   }
 
+  /**
+   * Drop one task tree: to the recycle bin, or for good when `permanent` is set.
+   * @param {Record<string, unknown>} input - `{id, permanent?}`.
+   * @returns {Promise<{ removed: number }>} how many rows went away.
+   */
+  async function dropTask(input: Record<string, unknown>): Promise<{ removed: number }> {
+    const removed = await watched.remove(input)
+    if (input.permanent !== true) return removed
+    await watched.purge(input)
+    return removed
+  }
+
   const handlers: Record<string, (input: Record<string, unknown>) => Promise<unknown>> = {
     list: () => watched.list(),
     create: input => watched.create(input),
     update: input => watched.update(input),
-    remove: input => watched.remove(input),
     // The panel has always called this `delete`; keep both spellings working.
-    delete: input => watched.remove(input),
+    remove: dropTask,
+    delete: dropTask,
     restore: input => watched.restore(input),
     purge: input => watched.purge(input),
     emptyTrash: () => watched.emptyTrash(),
