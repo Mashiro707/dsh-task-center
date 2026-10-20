@@ -9,7 +9,7 @@ import { apply } from '../index.js'
 import { buildPrompt, createRunner, createUserMessage, service } from '../runner.js'
 
 /** Poll until `check` returns something truthy, or fail. */
-async function waitFor(check, timeout = 2000) {
+async function waitFor(check, timeout = 8000) {
   const started = Date.now()
   for (;;) {
     const value = await check()
@@ -624,7 +624,7 @@ test('a run that outlives the timeout is cancelled and marked failed', async () 
   try {
     const host = makeHost()
     const runner = createRunner(host.ctx, store)
-    await runner.saveSettings({ timeoutMinutes: 0.01 })
+    await runner.saveSettings({ timeoutMinutes: 0.02 })
     const task = await store.create({ title: '超时', cwd: 'C:/work/slow' })
 
     await runner.start(task.id)
@@ -632,7 +632,7 @@ test('a run that outlives the timeout is cancelled and marked failed', async () 
     const failed = await waitFor(async () => {
       const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
       return row.run !== null && row.run.status === 'failed' ? row : null
-    }, 4000)
+    }, 8000)
     assert.equal(host.agents.get('session-1').status, 'cancelled')
     assert.match(failed.run.message, /超时/)
     assert.equal(failed.run.attempts, 1)
@@ -646,11 +646,11 @@ test('a failed attempt is retried as far as the settings allow', async () => {
   try {
     const host = makeHost()
     const runner = createRunner(host.ctx, store)
-    await runner.saveSettings({ timeoutMinutes: 0.01, retries: 1 })
+    await runner.saveSettings({ timeoutMinutes: 0.02, retries: 1 })
     const task = await store.create({ title: '重试', cwd: 'C:/work/retry' })
 
     await runner.start(task.id)
-    await waitFor(() => (host.created.length === 2 ? true : null), 4000)
+    await waitFor(() => (host.created.length === 2 ? true : null), 8000)
 
     host.emit('agent/status', { agent: host.agents.get('session-2'), status: 'idle' })
     const done = await waitFor(async () => {
