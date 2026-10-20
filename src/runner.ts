@@ -80,9 +80,10 @@ export interface TaskRunner {
   queue(): Promise<RunnerQueueState>
   /** @returns {Promise<RunnerSettings>} the persisted settings. */
   settings(): Promise<RunnerSettings>
-  /** @returns {{autoApproved: number, autoDelegated: number}} approval counters since this host started. */
+  /** @returns {{autoApproved: number, autoBlocked: number, autoDelegated: number}} approval counters since this host started. */
   stats(): {
     autoApproved: number
+    autoBlocked: number
     autoDelegated: number
     autoSeen: number
     statusEvents: number
@@ -358,7 +359,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   /** Sessions that reported idle before this runner knew which task owns them. */
   const earlyIdle = new Set<string>()
   let settings: RunnerSettings | null = null
-  const approvals = { approved: 0, delegated: 0, seen: 0 }
+  const approvals = { approved: 0, blocked: 0, delegated: 0, seen: 0 }
   // Counted so a stuck "running" row can be explained from the outside: either
   // the status event never arrives, or it arrives without the agent we need.
   const diagnostics = {
@@ -963,8 +964,18 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         if (call === undefined) return await next()
         const verdict = classifyCall(call.args, root)
         if (verdict !== 'inside') {
+          if (verdict === 'outside') {
+            // A task scoped to a workspace must not reach past it, and this
+            // deployment's own answerers would allow the call without a human
+            // seeing it. Refusing here is the only way "stay inside the
+            // workspace" stays true; an `unknown` verdict still asks a person.
+            approvals.blocked += 1
+            note(`approval blocked outside ${request.toolName}`)
+            ctx.logger?.info?.(`[task-center] ${request.toolName} 越过工作区，已拒绝（任务 ${taskId}）。`)
+            return 'rejected'
+          }
           approvals.delegated += 1
-          ctx.logger?.info?.(`[task-center] ${request.toolName} 越过工作区，交给你确认。`)
+          ctx.logger?.info?.(`[task-center] 无法判断 ${request.toolName} 是否在工作区内，交给你确认。`)
           return await next()
         }
         approvals.approved += 1
@@ -1036,6 +1047,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     stats() {
       return {
         autoApproved: approvals.approved,
+        autoBlocked: approvals.blocked,
         autoDelegated: approvals.delegated,
         autoSeen: approvals.seen,
         statusEvents: diagnostics.statusEvents,

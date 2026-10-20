@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-10-20
+
+### Changed
+
+- The approval gate now registers itself ahead of the other listeners
+  (`prepend`). Live, a plain subscription never received the request: another
+  answerer in the deployment answered it first.
+- An approval that provably leaves the task's workspace is now answered with
+  `rejected` instead of being handed on. Handing it on is not a neutral act in
+  this deployment — the next answerer allows the call without a human seeing
+  it, so "stay inside the workspace" would not hold. Calls whose arguments
+  cannot be classified still go back to the page.
+
+### Added
+
+- `autoBlocked` in the settings response, counting the out-of-workspace
+  approvals the gate refused.
+
 ## [1.4.1] - 2026-10-20
 
 ### Fixed

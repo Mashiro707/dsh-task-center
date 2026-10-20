@@ -801,7 +801,7 @@ test('an approval that stays inside the workspace is answered without the user',
   }
 })
 
-test('an approval that leaves the workspace still goes to the user', async () => {
+test('an approval that leaves the workspace is refused, not forwarded', async () => {
   const { store, dispose } = await makeStore()
   try {
     const host = makeHost()
@@ -824,11 +824,12 @@ test('an approval that leaves the workspace still goes to the user', async () =>
           return 'unavailable'
         },
       )
-      assert.deepEqual(results, ['unavailable'])
-      assert.equal(asked, true)
+      assert.deepEqual(results, ['rejected'], 'the gate answers instead of handing it on')
+      assert.equal(asked, false, 'nothing downstream gets to allow it')
     }
     const stats = runner.stats()
-    assert.equal(stats.autoDelegated, 3, 'every out-of-workspace call is handed back')
+    assert.equal(stats.autoBlocked, 3, 'every out-of-workspace call is refused')
+    assert.equal(stats.autoDelegated, 0)
     assert.equal(stats.autoApproved, 0)
   } finally {
     await dispose()
