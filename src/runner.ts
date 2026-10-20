@@ -415,11 +415,16 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     try {
       const available = presets.catalog().options.some(option => option.value === name)
       if (!available) {
+        note(`preset ${name}: 不在目录里`)
         ctx.logger?.warn?.(`[task-center] 没有 ${name} 这个权限预设，沿用会话默认值。`)
         return
       }
       presets.set(agent.session, name)
+      // Recorded because "the preset silently did not stick" looks exactly like
+      // "the agent behaved well" from the outside.
+      note(`preset ${name} -> ${String(presets.current?.(agent.session) ?? '?')}`)
     } catch (error) {
+      note(`preset ${name} 失败：${describe(error)}`)
       ctx.logger?.warn?.(`[task-center] 安装权限预设失败：${describe(error)}`)
     }
   }

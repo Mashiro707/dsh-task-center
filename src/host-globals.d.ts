@@ -103,6 +103,7 @@ interface HostPresetOption {
 interface HostPermissionPresets {
   catalog(): { options: HostPresetOption[]; defaultPreset?: string }
   set(session: HostSession, name: string): void
+  current?(session: HostSession): string
   resolve(name: string): { sandbox?: string; approval?: string } | undefined
 }
 
