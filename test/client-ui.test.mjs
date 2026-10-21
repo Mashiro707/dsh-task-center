@@ -78,6 +78,8 @@ test('every requested visual affordance is present', () => {
     ['date picker themed', /input\.tc-input\[type=date\]\{color-scheme/],
     ['one control height', /\.tc-input\{[^}]*height:30px/],
     ['buttons match the controls', /\.tc-btn\{[^}]*height:30px/],
+    ['popup follows the app theme', /body\[data-ds-dark-theme\] select\.tc-input[^{]*\{color-scheme:dark\}/],
+    ['themed scrollbars', /scrollbar-color:var\(--dsw-alias-border-l2\)/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
 })

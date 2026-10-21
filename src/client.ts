@@ -1911,6 +1911,10 @@ textarea.tc-input{height:auto;resize:vertical;min-height:72px;padding:5px 9px;li
 
 .tc-select-sm{flex:0 0 auto;font-size:12px;height:30px;padding:0 24px 0 8px;cursor:pointer}
 
+/* native popups and pickers follow the app theme, not just the OS one */
+body[data-ds-dark-theme] select.tc-input,body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
+.tc-body,.tc-drawer-body,.tc-blockers{scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent}
+
 .tc-searchwrap{position:relative;display:flex;align-items:center;flex:0 1 230px;min-width:150px}
 .tc-search-icon{position:absolute;left:9px;width:13px;height:13px;color:var(--dsw-alias-label-secondary);pointer-events:none}
 .tc-search{width:100%;padding-left:27px;font-size:12px}
