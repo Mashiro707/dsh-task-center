@@ -27,6 +27,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `run.kind` distinguishes a planning run from an executing run, and a task
   without stages is migrated to a single draft stage.
 
+### Fixed
+
+- Approving while the planning run is still open no longer leaves that run
+  behind: the plan row closes and the execution starts.
+- A run settles once even though the host delivers events to both the plain and
+  the global listener.
+- A retry starts with a fresh attempt counter instead of inheriting the failed
+  attempt's.
+- A task that carries only a workspace path now runs in that directory rather
+  than the host's default one.
+- An outcome that arrives between session creation and the run write is applied
+  when the row lands instead of being dropped.
+
 ## [1.4.4] - 2026-10-21
 
 ### Fixed
