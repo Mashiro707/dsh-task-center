@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-21
+
+### Fixed
+
+- The panel no longer renders blank when two tasks share a due date and a
+  priority: the sort comparator called `localeCompare` on an epoch number.
+
+### Added
+
+- A render crash is contained by an error boundary that shows the stack in the
+  panel and files it on the board as a blocked `[client-error]` task, so a
+  blank slot can never happen again without a trace.
+
 ## [1.5.0] - 2026-10-21
 
 ### Added

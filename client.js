@@ -60,6 +60,7 @@ window.__ModuleLoader__.load({
                 approve: '批准',
                 reject: '驳回',
                 viewDoc: '查看文档',
+                crashTitle: '面板出错了，错误详情已记录到任务板（[client-error] 开头的任务）。',
                 hideDoc: '收起文档',
                 docEmpty: '文档还没生成。',
                 awaitBadge: '待批准',
@@ -191,6 +192,7 @@ window.__ModuleLoader__.load({
                 approve: 'Approve',
                 reject: 'Reject',
                 viewDoc: 'View document',
+                crashTitle: 'The panel hit an error; the details were filed on the board as a [client-error] task.',
                 hideDoc: 'Hide document',
                 docEmpty: 'No document yet.',
                 awaitBadge: 'Awaiting approval',
@@ -279,7 +281,7 @@ window.__ModuleLoader__.load({
         };
         let fallbackT = (key) => (DICT.zh[key] === undefined ? key : DICT.zh[key]);
         function useT(props) {
-            return typeof props.t === 'function' ? props.t : fallbackT;
+            return props !== null && props !== undefined && typeof props.t === 'function' ? props.t : fallbackT;
         }
         // ------------------------------------------------------------------ data
         async function call(method, payload) {
@@ -302,6 +304,74 @@ window.__ModuleLoader__.load({
                 throw new Error(message);
             }
             return envelope.value;
+        }
+        /**
+         * A crash in the browser half is invisible from the host, so it is reported
+         * into the board itself: a blocked task titled `[client-error] …` carries
+         * the stack in its notes. Nothing here may throw, or reporting would become
+         * a second failure.
+         */
+        function reportClientError(kind, error, extra) {
+            try {
+                const message = error && error.message ? String(error.message) : String(error);
+                const stack = error && error.stack ? String(error.stack) : '';
+                const where = typeof location !== 'undefined' ? String(location.href) : '';
+                const agent = typeof navigator !== 'undefined' ? String(navigator.userAgent) : '';
+                const notes = [stack, extra, where, agent].filter((part) => part !== '').join('\n\n');
+                void fetch(API + 'create', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                        title: ('[client-error] ' + kind + ': ' + message).slice(0, 160),
+                        notes: notes.slice(0, 4000),
+                        status: 'blocked',
+                        priority: 'urgent',
+                        tags: ['client-error'],
+                    }),
+                }).catch(() => undefined);
+            }
+            catch (ignored) {
+                // Reporting must never escalate a crash.
+            }
+        }
+        // Real React always provides Component; the loading tests stub a minimal
+        // React, so fall back to a class that simply renders its children.
+        const BoundaryBase = React !== null && typeof React === 'object' && typeof React.Component === 'function'
+            ? React.Component
+            : class {
+                props;
+                state;
+                constructor(props) {
+                    this.props = props;
+                    this.state = { error: null };
+                }
+            };
+        /** Keeps a render crash inside the panel instead of blanking the slot. */
+        class PanelBoundary extends BoundaryBase {
+            constructor(props) {
+                super(props);
+                this.state = { error: null };
+            }
+            static getDerivedStateFromError(error) {
+                return { error };
+            }
+            componentDidCatch(error, info) {
+                reportClientError('render', error, info && info.componentStack ? String(info.componentStack) : '');
+            }
+            render() {
+                const error = this.state.error;
+                if (error === null || error === undefined)
+                    return this.props.children;
+                const t = this.props.t;
+                const detail = error && error.stack ? String(error.stack) : String(error);
+                return h('div', { className: 'tc-root' }, h('div', { className: 'tc-crash' }, h('p', { className: 'tc-crash-title' }, t('crashTitle')), h('pre', { className: 'tc-crash-detail' }, detail)));
+            }
+        }
+        /** Slot entry point: the boundary sits above the page, so it catches it all. */
+        function PanelShell(props) {
+            const safe = props === null || props === undefined ? {} : props;
+            const t = useT(safe);
+            return h(PanelBoundary, { t }, h(TaskCenterPage, safe));
         }
         function isoDate(date) {
             const year = date.getFullYear();
@@ -367,13 +437,19 @@ window.__ModuleLoader__.load({
                 pad(date.getMinutes()));
         }
         function bySchedule(a, b) {
-            const aDue = a.due === null ? '9999-99-99' : a.due;
-            const bDue = b.due === null ? '9999-99-99' : b.due;
+            const aDue = typeof a.due === 'string' && a.due !== '' ? a.due : '9999-99-99';
+            const bDue = typeof b.due === 'string' && b.due !== '' ? b.due : '9999-99-99';
             if (aDue !== bDue)
                 return aDue < bDue ? -1 : 1;
             if (a.priority !== b.priority)
                 return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-            return a.createdAt.localeCompare(b.createdAt);
+            // Timestamps arrive as epoch numbers, so `localeCompare` is not available.
+            if (typeof a.createdAt === 'number' && typeof b.createdAt === 'number') {
+                return a.createdAt - b.createdAt;
+            }
+            const aAt = String(a.createdAt === null || a.createdAt === undefined ? '' : a.createdAt);
+            const bAt = String(b.createdAt === null || b.createdAt === undefined ? '' : b.createdAt);
+            return aAt < bAt ? -1 : aAt > bAt ? 1 : 0;
         }
         // ------------------------------------------------------------------ icons
         function CheckMark(props) {
@@ -1668,6 +1744,9 @@ body[data-ds-dark-theme] select.tc-input,body[data-ds-dark-theme] input.tc-input
 /* ----------------------------------------------------------------- fields */
 .tc-group{display:flex;flex-direction:column;gap:9px;padding:11px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;background:var(--dsw-alias-bg-base)}
 .tc-group-title{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}
+.tc-crash{padding:18px;display:flex;flex-direction:column;gap:10px}
+.tc-crash-title{margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-state-error-primary)}
+.tc-crash-detail{margin:0;padding:10px;max-height:50vh;overflow:auto;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .tc-stagebar{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:12px;color:var(--dsw-alias-label-secondary)}
 .tc-stagebar-dots{display:inline-flex;gap:3px}
 .tc-sdot{width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-border-l2);transition:background .15s ease}
@@ -1763,6 +1842,16 @@ body[data-ds-dark-theme] select.tc-input,body[data-ds-dark-theme] input.tc-input
                 document.head.appendChild(tag);
             }
         }
+        // A crash outside React (an event handler, a rejected promise) never reaches
+        // the boundary, so it is trapped at the window as well.
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+            window.addEventListener('error', (event) => {
+                reportClientError('window', (event && event.error) || (event && event.message) || 'unknown', event && event.filename ? String(event.filename) + ':' + String(event.lineno) : '');
+            });
+            window.addEventListener('unhandledrejection', (event) => {
+                reportClientError('rejection', (event && event.reason) || 'unknown', '');
+            });
+        }
         // -------------------------------------------------------------- lifecycle
         function apply(ctx) {
             let bound = null;
@@ -1777,7 +1866,7 @@ body[data-ds-dark-theme] select.tc-input,body[data-ds-dark-theme] input.tc-input
                 fallbackT = bound;
             }
             ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: PANEL_ORDER, label: () => (fallbackT('nav')), locale: NS }, PanelIcon));
-            ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS }, TaskCenterPage));
+            ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS }, PanelShell));
         }
         const name = 'task-center';
         return { inject: ['slots', 'locale'], apply, name };

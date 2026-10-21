@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
@@ -213,4 +214,39 @@ test('a stage shows its document and waits for an approval click', () => {
   assert.match(source, /'rejectStage'/, 'rejecting is a host call')
   assert.match(source, /onStageDoc/, 'the document is fetched, not inlined')
   assert.match(source, /onStageAction/, 'the drawer asks the page to approve or reject')
+})
+
+test('the card order survives numeric timestamps', () => {
+  // The host stores epoch milliseconds, so the comparator must never call a
+  // string method on them; the panel used to blank out as soon as two tasks
+  // shared a due date and a priority.
+  const built = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  const start = built.indexOf('function bySchedule(a, b) {')
+  assert.notEqual(start, -1, 'the comparator is part of the built artifact')
+  let depth = 0
+  let end = start
+  for (let index = built.indexOf('{', start); index < built.length; index += 1) {
+    if (built[index] === '{') depth += 1
+    if (built[index] === '}') {
+      depth -= 1
+      if (depth === 0) {
+        end = index + 1
+        break
+      }
+    }
+  }
+  const snippet = built.slice(start, end)
+  const factory = new Function(
+    'const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };\n' +
+      snippet +
+      '\nreturn bySchedule;',
+  )
+  const bySchedule = factory()
+  const older = { due: null, priority: 'normal', createdAt: 1000 }
+  const newer = { due: null, priority: 'normal', createdAt: 2000 }
+  assert.equal(bySchedule(older, newer) < 0, true, 'older tasks sort first')
+  assert.equal(bySchedule(newer, older) > 0, true, 'newer tasks sort last')
+  assert.equal(bySchedule(older, { ...older }), 0, 'equal stamps compare equal')
+  const withDue = { due: '2026-01-01', priority: 'normal', createdAt: 5000 }
+  assert.equal(bySchedule(withDue, older) < 0, true, 'a due task outranks an undated one')
 })
