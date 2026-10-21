@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -7,6 +7,7 @@ import test from 'node:test'
 import { createTaskStore } from '../index.js'
 import { apply } from '../index.js'
 import { buildPrompt, createRunner, createUserMessage, service } from '../runner.js'
+import { stageRelPath, writeStageDocs } from '../stages.js'
 
 /** Poll until `check` returns something truthy, or fail. */
 async function waitFor(check, timeout = 20000) {
@@ -112,7 +113,7 @@ async function makeStore() {
     dir,
     dataFile,
     store: createTaskStore({ dataFile }),
-    dispose: () => rm(dir, { recursive: true, force: true }),
+    dispose: () => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   }
 }
 
@@ -754,7 +755,12 @@ test('a failed attempt is retried as far as the settings allow', async () => {
     const task = await store.create({ title: '重试', cwd: 'C:/work/retry' })
 
     await runner.start(task.id)
-    await waitFor(() => (host.created.length === 1 ? true : null), 8000)
+    // Wait for the run row, not just the session: an error that lands while the
+    // row is still missing is deliberately ignored by `settle`.
+    await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row !== undefined && row.run !== null && row.run.status === 'running' ? row : null
+    }, 8000)
 
     // Fail the first attempt outright, so the retry does not ride on a timer.
     host.emit('agent/error', {
@@ -963,6 +969,156 @@ test('turning auto-run on picks up the tasks already waiting', async () => {
     const after = await store.list()
     assert.equal(after.tasks.find(task => task.id === waiting.id).run.status, 'running', 'the waiting task starts')
     assert.equal(after.tasks.find(task => task.id === finished.id).run.sessionId, 'session-old', 'a task that already ran is left alone')
+  } finally {
+    await dispose()
+  }
+})
+
+/** Write one stage document and leave that stage ready to execute. */
+async function planOneStage(store, task, workspace, overrides = {}) {
+  const stage = {
+    ...task.stages[0],
+    title: overrides.title ?? '改接口',
+    scope: overrides.scope ?? ['src'],
+    verify: overrides.verify ?? ['node --version'],
+    docPath: stageRelPath(task.id, 1),
+    status: overrides.status ?? 'approved',
+    message: null,
+  }
+  await writeStageDocs(
+    workspace,
+    task.id,
+    [{ title: stage.title, goal: '把 A 改成 B', scope: stage.scope, steps: ['改代码'], verify: stage.verify }],
+    task.title,
+  )
+  return store.update({ id: task.id, stages: [stage], stageIndex: 0 })
+}
+
+test('a fresh task plans before it touches code', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '规划一次', workspacePath: workspace })
+    const run = await runner.start(task.id)
+    assert.equal(run.run.kind, 'plan', 'the first run writes documents, it does not code')
+    const message = host.agents.get(run.run.sessionId).inbox[0]
+    assert.ok(message.content[0].text.includes('task_stage_plan'), 'the prompt names the planning tool')
+    assert.ok(message.content[0].text.includes(task.id))
+  } finally {
+    await dispose()
+  }
+})
+
+test('an approved stage runs its document and verification closes it', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '执行一次', workspacePath: workspace })
+    await planOneStage(store, task, workspace)
+
+    const run = await runner.start(task.id)
+    assert.equal(run.run.kind, 'execute')
+    const message = host.agents.get(run.run.sessionId).inbox[0]
+    assert.ok(message.content[0].text.includes('把 A 改成 B'), 'the document is the prompt')
+
+    host.emit('agent/status', { agent: { id: run.run.sessionId }, status: 'idle' })
+    const row = await waitFor(async () => {
+      const board = await store.list()
+      const found = board.tasks.find((entry) => entry.id === task.id)
+      return found !== undefined && found.stages[0].status === 'done' ? found : null
+    })
+    assert.equal(row.status, 'done', 'the last stage finishing finishes the task')
+    assert.ok(row.stages[0].output.includes('node --version'), 'the verification output is kept')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a stage whose verification fails is marked failed, not done', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '验收不过', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { verify: ['node -e "process.exit(3)"'] })
+
+    const run = await runner.start(task.id)
+    host.emit('agent/status', { agent: { id: run.run.sessionId }, status: 'idle' })
+    const row = await waitFor(async () => {
+      const board = await store.list()
+      const found = board.tasks.find((entry) => entry.id === task.id)
+      return found !== undefined && found.stages[0].status === 'failed' ? found : null
+    })
+    assert.notEqual(row.status, 'done')
+    assert.ok(row.stages[0].message.includes('验收没通过'))
+  } finally {
+    await dispose()
+  }
+})
+
+test('the gate holds an executing run inside the stage scope', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '只改 src', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { scope: ['src'] })
+    const run = await runner.start(task.id)
+
+    host.emit('session/event', { id: run.run.sessionId }, {
+      type: 'tool/call',
+      data: { callId: 'call-in-scope', name: 'write', arguments: { path: join(workspace, 'src', 'a.ts') } },
+    })
+    host.emit('session/event', { id: run.run.sessionId }, {
+      type: 'tool/call',
+      data: { callId: 'call-out-of-scope', name: 'write', arguments: { path: join(workspace, 'docs', 'x.md') } },
+    })
+
+    const next = async () => 'unavailable'
+    const inside = await host.emitAsync(
+      'approval/request',
+      { agent: { id: run.run.sessionId }, toolName: 'write', callId: 'call-in-scope' },
+      next,
+    )
+    assert.deepEqual(inside, ['allowed-once'])
+    const outside = await host.emitAsync(
+      'approval/request',
+      { agent: { id: run.run.sessionId }, toolName: 'write', callId: 'call-out-of-scope' },
+      next,
+    )
+    assert.deepEqual(outside, ['rejected'], 'the document, not the workspace, bounds an executing stage')
+  } finally {
+    await dispose()
+  }
+})
+
+test('rejecting a document sends the stage back to planning', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '驳回一次', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { status: 'awaiting-approval' })
+
+    const rejected = await runner.rejectStage(task.id, undefined, '范围太大')
+    assert.equal(rejected.stages[0].status, 'draft')
+    assert.equal(rejected.stages[0].message, '范围太大')
+    await assert.rejects(stat(join(workspace, stageRelPath(task.id, 1))), 'the rejected document is removed')
+
+    const rerun = await runner.start(task.id)
+    assert.equal(rerun.run.kind, 'plan', 'a rejected stage goes back to planning')
   } finally {
     await dispose()
   }

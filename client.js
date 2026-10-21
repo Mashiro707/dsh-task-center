@@ -49,6 +49,22 @@ window.__ModuleLoader__.load({
                 groupSchedule: '状态与时间',
                 groupContent: '内容',
                 groupDeps: '依赖',
+                groupStages: '阶段',
+                stageHint: '每个阶段先写文档，你批准之后才会执行。',
+                stageDraft: '待规划',
+                stageAwait: '待批准',
+                stageApproved: '已批准',
+                stageRunning: '执行中',
+                stageDone: '已完成',
+                stageFailed: '失败',
+                approve: '批准',
+                reject: '驳回',
+                viewDoc: '查看文档',
+                hideDoc: '收起文档',
+                docEmpty: '文档还没生成。',
+                awaitBadge: '待批准',
+                noticeApproved: '已批准，开跑就会按文档执行。',
+                noticeRejected: '已驳回，这一阶段会重新规划。',
                 tagsPlaceholder: '用逗号分隔',
                 notesPlaceholder: '补充说明…',
                 dueClear: '清除日期',
@@ -164,6 +180,22 @@ window.__ModuleLoader__.load({
                 groupSchedule: 'Status and schedule',
                 groupContent: 'Content',
                 groupDeps: 'Dependencies',
+                groupStages: 'Stages',
+                stageHint: 'Each stage writes a document first; it runs only after you approve it.',
+                stageDraft: 'To plan',
+                stageAwait: 'Awaiting approval',
+                stageApproved: 'Approved',
+                stageRunning: 'Running',
+                stageDone: 'Done',
+                stageFailed: 'Failed',
+                approve: 'Approve',
+                reject: 'Reject',
+                viewDoc: 'View document',
+                hideDoc: 'Hide document',
+                docEmpty: 'No document yet.',
+                awaitBadge: 'Awaiting approval',
+                noticeApproved: 'Approved — the next run follows the document.',
+                noticeRejected: 'Rejected — this stage will be planned again.',
                 tagsPlaceholder: 'Comma separated',
                 notesPlaceholder: 'Anything worth remembering…',
                 dueClear: 'Clear date',
@@ -468,6 +500,10 @@ window.__ModuleLoader__.load({
                 task.tags.length > 0 ||
                 subtasks.length > 0 ||
                 task.priority !== 'normal';
+            const stages = Array.isArray(task.stages) ? task.stages : [];
+            const stageIndex = typeof task.stageIndex === 'number' ? task.stageIndex : 0;
+            const stageCurrent = stages.length === 0 ? null : stages[Math.min(stageIndex, stages.length - 1)];
+            const stageAwaiting = stageCurrent !== null && stageCurrent.status === 'awaiting-approval';
             const meta = [];
             const workspaceName = typeof props.workspaceName === 'string' ? props.workspaceName : '';
             if (workspaceName !== '') {
@@ -548,7 +584,16 @@ window.__ModuleLoader__.load({
                                 props.onRun(task.id);
                             },
                         }, h(PlayIcon))
-                        : null), hasMeta ? h('div', { className: 'tc-card-meta' }, meta) : null);
+                        : null), stages.length > 0 && task.status !== 'done'
+                ? h('div', { className: 'tc-stagebar' + (stageAwaiting ? ' tc-stagebar-await' : '') }, h('span', { className: 'tc-stagebar-dots' }, stages.map((entry, index) => h('span', {
+                    key: String(index),
+                    className: 'tc-sdot tc-sdot-' +
+                        String(entry.status).replace(/-/g, '') +
+                        (index === stageIndex ? ' tc-sdot-current' : ''),
+                }))), h('span', { className: 'tc-stagebar-text' }, stageAwaiting
+                    ? t('awaitBadge')
+                    : t('groupStages') + ' ' + String(Math.min(stageIndex + 1, stages.length)) + '/' + String(stages.length)))
+                : null, hasMeta ? h('div', { className: 'tc-card-meta' }, meta) : null);
         }
         function BoardColumn(props) {
             const t = props.t;
@@ -620,6 +665,38 @@ window.__ModuleLoader__.load({
             const candidates = allTasks.filter((entry) => entry.id !== task.id && entry.parentId !== task.id);
             const workspaces = Array.isArray(props.workspaces) ? props.workspaces : [];
             const permissions = Array.isArray(props.permissions) ? props.permissions : [];
+            const stages = Array.isArray(task.stages) ? task.stages : [];
+            const stageIndex = typeof task.stageIndex === 'number' ? task.stageIndex : 0;
+            const [doc, setDoc] = useState(null);
+            const [docBusy, setDocBusy] = useState(false);
+            const stageLabel = {
+                draft: t('stageDraft'),
+                'awaiting-approval': t('stageAwait'),
+                approved: t('stageApproved'),
+                running: t('stageRunning'),
+                done: t('stageDone'),
+                failed: t('stageFailed'),
+            };
+            const toggleDoc = async (ordinal) => {
+                if (doc !== null && doc.ordinal === ordinal) {
+                    setDoc(null);
+                    return;
+                }
+                setDocBusy(true);
+                try {
+                    const value = await props.onStageDoc(task.id, ordinal);
+                    setDoc({ ordinal, text: value === null || value.text === undefined ? '' : String(value.text) });
+                }
+                catch (error) {
+                    setDoc({ ordinal, text: error && error.message ? String(error.message) : String(error) });
+                }
+                finally {
+                    setDocBusy(false);
+                }
+            };
+            const act = (action, ordinal) => {
+                void props.onStageAction(task.id, ordinal, action);
+            };
             const globalPreset = typeof props.globalPreset === 'string' && props.globalPreset !== '' ? props.globalPreset : 'auto';
             const presetLabel = permissions.find((option) => option.value === globalPreset);
             const inheritLabel = t('permissionInherit').replace('{name}', presetLabel === undefined ? globalPreset : presetLabel.name);
@@ -785,7 +862,37 @@ window.__ModuleLoader__.load({
                 className: 'tc-switch-check',
                 checked: form.autoApprove,
                 onChange: (event) => stage({ autoApprove: event.target.checked }),
-            }), h('span', { className: 'tc-switch-track' }, h('span', { className: 'tc-switch-dot' })), h('span', { className: 'tc-switch-text' }, form.autoApprove ? t('autoApproveOn') : t('autoApproveOff'))), h('span', { className: 'tc-fieldhint' }, t('autoApproveHint')))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupDeps')), candidates.length === 0
+            }), h('span', { className: 'tc-switch-track' }, h('span', { className: 'tc-switch-dot' })), h('span', { className: 'tc-switch-text' }, form.autoApprove ? t('autoApproveOn') : t('autoApproveOff'))), h('span', { className: 'tc-fieldhint' }, t('autoApproveHint')))), stages.length > 0
+                ? h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupStages')), h('ol', { className: 'tc-stagelist' }, stages.map((entry, index) => {
+                    const awaiting = entry.status === 'awaiting-approval';
+                    const current = index === stageIndex;
+                    return h('li', {
+                        key: String(index),
+                        className: 'tc-stage' + (current ? ' tc-stage-current' : ''),
+                    }, h('span', { className: 'tc-stage-no' }, String(index + 1)), h('span', { className: 'tc-stage-title' }, entry.title), h('span', { className: 'tc-stage-pill tc-stage-' + String(entry.status).replace(/-/g, '') }, stageLabel[entry.status] === undefined ? String(entry.status) : stageLabel[entry.status]), h('span', { className: 'tc-stage-acts' }, h('button', {
+                        type: 'button',
+                        className: 'tc-btn tc-btn-quiet',
+                        disabled: docBusy,
+                        onClick: () => {
+                            void toggleDoc(index + 1);
+                        },
+                    }, doc !== null && doc.ordinal === index + 1 ? t('hideDoc') : t('viewDoc')), awaiting
+                        ? h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-primary',
+                            onClick: () => act('approveStage', index + 1),
+                        }, t('approve'))
+                        : null, awaiting
+                        ? h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-danger',
+                            onClick: () => act('rejectStage', index + 1),
+                        }, t('reject'))
+                        : null));
+                })), h('span', { className: 'tc-fieldhint' }, t('stageHint')), doc === null
+                    ? null
+                    : h('pre', { className: 'tc-doc' }, doc.text.trim() === '' ? t('docEmpty') : doc.text))
+                : null, h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupDeps')), candidates.length === 0
                 ? h('p', { className: 'tc-fieldhint' }, t('noBlockers'))
                 : h('div', { className: 'tc-blockers' }, candidates.map((candidate) => {
                     const checked = form.blockedBy.indexOf(candidate.id) !== -1;
@@ -1160,6 +1267,21 @@ window.__ModuleLoader__.load({
                 if (ok)
                     setNotice({ kind: 'ok', text: t('noticeCanceled') });
             };
+            /** Approve or reject the document of one stage, then re-read the board. */
+            const stageAction = async (id, ordinal, action) => {
+                try {
+                    await call(action, { id, ordinal });
+                    await refresh();
+                    setNotice({
+                        kind: 'ok',
+                        text: action === 'approveStage' ? t('noticeApproved') : t('noticeRejected'),
+                    });
+                }
+                catch (error) {
+                    setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) });
+                }
+            };
+            const stageDoc = (id, ordinal) => call('stageDoc', { id, ordinal });
             const toggleAutoRun = async () => {
                 const next = !(runner !== null && runner.autoRun === true);
                 try {
@@ -1346,6 +1468,8 @@ window.__ModuleLoader__.load({
                         void mutate('delete', { id });
                     },
                     onOpenTask: (id) => setOpenId(id),
+                    onStageAction: stageAction,
+                    onStageDoc: stageDoc,
                     onDelete: deleteTask,
                 }), notice === null
                 ? null
@@ -1544,6 +1668,28 @@ body[data-ds-dark-theme] select.tc-input,body[data-ds-dark-theme] input.tc-input
 /* ----------------------------------------------------------------- fields */
 .tc-group{display:flex;flex-direction:column;gap:9px;padding:11px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;background:var(--dsw-alias-bg-base)}
 .tc-group-title{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary)}
+.tc-stagebar{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.tc-stagebar-dots{display:inline-flex;gap:3px}
+.tc-sdot{width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-border-l2);transition:background .15s ease}
+.tc-sdot-awaitingapproval{background:var(--dsw-alias-state-warn-primary)}
+.tc-sdot-approved,.tc-sdot-running{background:var(--dsw-alias-brand-primary)}
+.tc-sdot-done{background:var(--dsw-alias-state-success-primary)}
+.tc-sdot-failed{background:var(--dsw-alias-state-error-primary)}
+.tc-sdot-current{outline:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,transparent);outline-offset:1px}
+.tc-stagebar-await{color:var(--dsw-alias-state-warn-primary)}
+.tc-stagelist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.tc-stage{display:flex;align-items:center;gap:7px;padding:5px 7px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);font-size:12px}
+.tc-stage-current{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 38%,var(--dsw-alias-border-l1))}
+.tc-stage-no{flex:0 0 auto;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:12px;font-variant-numeric:tabular-nums}
+.tc-stage-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary)}
+.tc-stage-pill{flex:0 0 auto;padding:0 7px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.6}
+.tc-stage-pill.tc-stage-awaitingapproval{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 38%,transparent)}
+.tc-stage-pill.tc-stage-failed{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
+.tc-stage-pill.tc-stage-done{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 38%,transparent)}
+.tc-stage-acts{flex:0 0 auto;display:inline-flex;gap:4px}
+.tc-btn-quiet{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}
+.tc-btn-quiet:hover{color:var(--dsw-alias-label-primary)}
+.tc-doc{margin:0;max-height:260px;overflow:auto;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 .tc-field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .tc-field-row{display:flex;gap:10px}
 .tc-field-half{flex:1 1 0;min-width:0}

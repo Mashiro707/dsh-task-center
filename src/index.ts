@@ -14,6 +14,7 @@ import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createRunner, service, type TaskRunner } from './runner.js'
+import { currentStage, DOC_ROOT, stageRelPath, writeStageDocs, type StageDocInput } from './stages.js'
 
 /** One HTTP request as handed to a route handler. */
 type HttpRequest = import('node:http').IncomingMessage
@@ -252,6 +253,7 @@ function normalizeRun(raw: unknown): TaskRun | null {
       ? source.status
       : 'failed'
   const attempts = Number.isFinite(source.attempts) && (source.attempts as number) > 0 ? Math.trunc(source.attempts as number) : status === 'queued' ? 0 : 1
+  const kind: TaskRunKind | undefined = source.kind === 'plan' || source.kind === 'execute' ? source.kind : undefined
   return {
     sessionId: typeof source.sessionId === 'string' && source.sessionId !== '' ? source.sessionId : null,
     status,
@@ -259,6 +261,7 @@ function normalizeRun(raw: unknown): TaskRun | null {
     endedAt: Number.isFinite(source.endedAt) ? (source.endedAt as number) : null,
     message: typeof source.message === 'string' && source.message !== '' ? source.message : null,
     attempts,
+    ...(kind === undefined ? {} : { kind }),
   }
 }
 
@@ -297,6 +300,107 @@ function cleanIdList(value: unknown): string[] {
   return [...seen]
 }
 
+/** Most stages one task may be split into. */
+export const MAX_STAGES = 12
+
+/** Where a stage's document lives, relative to the task workspace. */
+export function stageDocPath(taskId: string, ordinal: number): string {
+  return `docs/task-center/${taskId}/stage-${ordinal}.md`
+}
+
+/**
+ * @param {unknown} value - candidate list of strings.
+ * @returns {string[]} trimmed, de-duplicated, non-empty entries.
+ */
+function cleanStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const text = entry.trim()
+    if (text !== '') seen.add(text)
+  }
+  return [...seen]
+}
+
+/**
+ * @param {string} taskId - owner; the document path is derived from it.
+ * @param {string} title - stage title, also the first line of its document.
+ * @param {string} goal - what the stage has to achieve.
+ * @returns {TaskStage} a fresh draft stage.
+ */
+function draftStage(taskId: string, title: string, goal: string): TaskStage {
+  return {
+    index: 1,
+    title,
+    goal,
+    docPath: stageDocPath(taskId, 1),
+    scope: [],
+    verify: [],
+    status: 'draft',
+    message: null,
+    output: null,
+    startedAt: null,
+    endedAt: null,
+  }
+}
+
+/**
+ * Rebuild one stage from disk; the document path is always recomputed so a
+ * renamed task id cannot point at another task's document.
+ * @param {unknown} raw - stored stage.
+ * @param {string} taskId - owning task.
+ * @param {number} position - 0-based position in the list.
+ * @returns {TaskStage | null} the normalized stage.
+ */
+function normalizeStage(raw: unknown, taskId: string, position: number): TaskStage | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const source = raw as Record<string, unknown>
+  const title = cleanText(source.title)
+  if (title === null) return null
+  const status: TaskStageStatus =
+    source.status === 'draft' ||
+    source.status === 'awaiting-approval' ||
+    source.status === 'approved' ||
+    source.status === 'running' ||
+    source.status === 'done' ||
+    source.status === 'failed'
+      ? source.status
+      : 'draft'
+  return {
+    index: position + 1,
+    title,
+    goal: typeof source.goal === 'string' ? source.goal : '',
+    docPath: stageDocPath(taskId, position + 1),
+    scope: cleanStringList(source.scope),
+    verify: cleanStringList(source.verify),
+    status,
+    message: cleanText(source.message),
+    output: typeof source.output === 'string' && source.output !== '' ? source.output : null,
+    startedAt: Number.isFinite(source.startedAt) ? (source.startedAt as number) : null,
+    endedAt: Number.isFinite(source.endedAt) ? (source.endedAt as number) : null,
+  }
+}
+
+/**
+ * @param {unknown} raw - stored stage list.
+ * @param {string} taskId - owning task.
+ * @returns {TaskStage[]} normalized stages in order.
+ */
+function normalizeStages(raw: unknown, taskId: string): TaskStage[] {
+  if (!Array.isArray(raw)) return []
+  const stages: TaskStage[] = []
+  for (const entry of raw) {
+    if (stages.length >= MAX_STAGES) break
+    const stage = normalizeStage(entry, taskId, stages.length)
+    if (stage !== null) stages.push(stage)
+  }
+  return stages
+}
+
+export { currentStage }
+
+
 /**
  * @param {Record<string, unknown> | null} raw - one row from disk.
  * @returns {TaskRecord | null} the normalized row.
@@ -312,10 +416,20 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
   const createdAt = Number.isFinite(raw.createdAt) ? (raw.createdAt as number) : Date.now()
   const workspaceId = cleanText(raw.workspaceId)
   const workspacePath = cleanCwd(raw.workspacePath)
+  const notes = typeof raw.notes === 'string' ? raw.notes : ''
+  const deletedAt = Number.isFinite(raw.deletedAt) ? (raw.deletedAt as number) : null
+  let stages = normalizeStages(raw.stages, id)
+  if (stages.length === 0 && deletedAt === null && status !== 'done') {
+    // Rows written before the staged workflow get one draft stage so the next
+    // run starts by writing a document instead of editing code.
+    stages = [draftStage(id, title, notes.trim() === '' ? title : notes.trim())]
+  }
+  const rawIndex = Number.isFinite(raw.stageIndex) ? Math.trunc(raw.stageIndex as number) : 0
+  const stageIndex = Math.max(0, Math.min(rawIndex, stages.length))
   return {
     id,
     title,
-    notes: typeof raw.notes === 'string' ? raw.notes : '',
+    notes,
     status,
     priority,
     due,
@@ -327,11 +441,13 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
     autoApprove: raw.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : raw.autoApprove === true,
     run: normalizeRun(raw.run),
+    stages,
+    stageIndex,
     parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
     createdAt,
     updatedAt: Number.isFinite(raw.updatedAt) ? (raw.updatedAt as number) : createdAt,
     completedAt: Number.isFinite(raw.completedAt) ? (raw.completedAt as number) : null,
-    deletedAt: Number.isFinite(raw.deletedAt) ? (raw.deletedAt as number) : null,
+    deletedAt,
     trashRoot: typeof raw.trashRoot === 'string' && raw.trashRoot !== '' ? raw.trashRoot : null,
   }
 }
@@ -439,7 +555,11 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
    */
   async function transact<T>(mutate: (records: TaskRecord[]) => T): Promise<T> {
     const current = await readRecords()
-    const draft = current.map(record => ({ ...record, tags: [...record.tags] }))
+    const draft = current.map(record => ({
+      ...record,
+      tags: [...record.tags],
+      stages: record.stages.map(stage => ({ ...stage, scope: [...stage.scope], verify: [...stage.verify] })),
+    }))
     const result = mutate(draft)
     await commit(draft)
     return result
@@ -519,10 +639,13 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
         const status: TaskStatus = input.status === undefined ? 'todo' : cleanStatus(input.status)
         const workspaceId = cleanText(input.workspaceId)
         const workspacePath = cleanCwd(input.workspacePath)
+        const id = `t_${now.toString(36)}_${randomUUID().slice(0, 8)}`
+        const title = cleanTitle(input.title)
+        const notes = cleanNotes(input.notes)
         const record: TaskRecord = {
-          id: `t_${now.toString(36)}_${randomUUID().slice(0, 8)}`,
-          title: cleanTitle(input.title),
-          notes: cleanNotes(input.notes),
+          id,
+          title,
+          notes,
           status,
           priority: input.priority === undefined ? 'normal' : cleanPriority(input.priority),
           due: cleanDue(input.due),
@@ -534,6 +657,8 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           blockedBy: cleanIdList(input.blockedBy),
           autoApprove: input.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : input.autoApprove === true,
           run: null,
+          stages: [draftStage(id, title, notes.trim() === '' ? title : notes.trim())],
+          stageIndex: 0,
           parentId,
           createdAt: now,
           updatedAt: now,
@@ -542,7 +667,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           trashRoot: null,
         }
         records.push(record)
-        return { ...record, tags: [...record.tags] }
+        return { ...record, tags: [...record.tags], stages: record.stages.map(stage => ({ ...stage, scope: [...stage.scope], verify: [...stage.verify] })) }
       })
     },
 
@@ -568,6 +693,13 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
         }
         if (input.autoApprove !== undefined) record.autoApprove = input.autoApprove === true
         if (input.run !== undefined) record.run = normalizeRun(input.run)
+        if (input.stages !== undefined) {
+          record.stages = normalizeStages(input.stages, record.id)
+          record.stageIndex = Math.max(0, Math.min(record.stageIndex, record.stages.length))
+        }
+        if (input.stageIndex !== undefined && Number.isFinite(input.stageIndex)) {
+          record.stageIndex = Math.max(0, Math.min(Math.trunc(input.stageIndex as number), record.stages.length))
+        }
         if (input.status !== undefined) {
           const status = cleanStatus(input.status)
           if (status === 'done' && record.status !== 'done') record.completedAt = Date.now()
@@ -589,7 +721,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           }
         }
         record.updatedAt = Date.now()
-        return { ...record, tags: [...record.tags] }
+        return { ...record, tags: [...record.tags], stages: record.stages.map(stage => ({ ...stage, scope: [...stage.scope], verify: [...stage.verify] })) }
       })
     },
 
@@ -906,6 +1038,118 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
     },
   })
 
+  add({
+    name: 'task_stage_plan',
+    description:
+      'Submit the stage plan for a task that is in its planning run. Writes one document per stage under docs/task-center/<task-id>/ and hands the task back to the user for approval. Only valid while that task is being planned.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task id being planned.' },
+        stages: {
+          type: 'array',
+          description: 'Ordered stages; each becomes one document the user approves before it runs.',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Short stage name.' },
+              goal: { type: 'string', description: 'What this stage must achieve.' },
+              scope: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Files or directories this stage may change, relative to the workspace or absolute.',
+              },
+              steps: { type: 'array', items: { type: 'string' }, description: 'How to get there, in order.' },
+              verify: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Commands that must exit 0 before the stage counts as done.',
+              },
+            },
+            required: ['title', 'goal', 'verify'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['task_id', 'stages'],
+      additionalProperties: false,
+    },
+    output: JSON_OUTPUT,
+    execute: async args => {
+      const taskId = typeof args?.task_id === 'string' ? args.task_id.trim() : ''
+      if (taskId === '') throw storeError('bad-request', '缺少 task_id。')
+      const board = await store.list()
+      const task = board.tasks.find(entry => entry.id === taskId)
+      if (task === undefined || task.deletedAt !== null) throw storeError('not-found', `找不到任务 ${taskId}。`)
+      if ((task.run?.kind ?? '') !== 'plan') {
+        throw storeError('not-planning', '这个任务当前不在规划阶段，不能提交计划。')
+      }
+      const root = (task.workspacePath ?? task.cwd ?? '').trim()
+      if (root === '') throw storeError('workspace-missing', '这个任务还没有工作区。')
+      const raw = Array.isArray(args?.stages) ? args.stages : []
+      if (raw.length === 0) throw storeError('bad-request', '至少要给一个阶段。')
+      if (raw.length > MAX_STAGES) throw storeError('bad-request', `最多 ${MAX_STAGES} 个阶段。`)
+      const parsed: StageDocInput[] = []
+      for (const [position, entry] of raw.entries()) {
+        const source = entry !== null && typeof entry === 'object' ? (entry as Record<string, unknown>) : {}
+        const title = typeof source.title === 'string' ? source.title.trim() : ''
+        const goal = typeof source.goal === 'string' ? source.goal.trim() : ''
+        const scope = cleanStringList(source.scope)
+        const steps = cleanStringList(source.steps)
+        const verify = cleanStringList(source.verify)
+        if (title === '') throw storeError('bad-request', `第 ${position + 1} 个阶段缺少标题。`)
+        if (goal === '') throw storeError('bad-request', `第 ${position + 1} 个阶段缺少目标。`)
+        if (verify.length === 0) throw storeError('bad-request', `第 ${position + 1} 个阶段没有验收命令。`)
+        parsed.push({ title, goal, scope, steps, verify })
+      }
+      await writeStageDocs(root, taskId, parsed, task.title)
+      const stages: TaskStage[] = parsed.map((entry, position) => ({
+        index: position + 1,
+        title: entry.title,
+        goal: entry.goal,
+        docPath: stageRelPath(taskId, position + 1),
+        scope: entry.scope,
+        verify: entry.verify,
+        status: position === 0 ? 'awaiting-approval' : 'draft',
+        message: null,
+        output: null,
+        startedAt: null,
+        endedAt: null,
+      }))
+      await store.update({ id: taskId, stages, stageIndex: 0 })
+      return { task_id: taskId, stages: stages.length, doc_dir: `${DOC_ROOT}/${taskId}` }
+    },
+  })
+
+  add({
+    name: 'task_stage_report',
+    description:
+      'Record one line about the stage you just worked on. Call it once at the end of a stage run. The host decides whether the stage is done by running its verification commands, not from this text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task id.' },
+        summary: { type: 'string', description: 'One sentence: what happened.' },
+      },
+      required: ['task_id', 'summary'],
+      additionalProperties: false,
+    },
+    output: JSON_OUTPUT,
+    execute: async args => {
+      const taskId = typeof args?.task_id === 'string' ? args.task_id.trim() : ''
+      const summary = typeof args?.summary === 'string' ? args.summary.trim() : ''
+      if (taskId === '' || summary === '') throw storeError('bad-request', '需要 task_id 和 summary。')
+      const board = await store.list()
+      const task = board.tasks.find(entry => entry.id === taskId)
+      if (task === undefined) throw storeError('not-found', `找不到任务 ${taskId}。`)
+      const stage = currentStage(task)
+      const line = `[阶段 ${stage === null ? '?' : stage.index}] ${summary}`
+      const notes = task.notes.trim() === '' ? line : `${task.notes.trim()}\n${line}`
+      const record = await store.update({ id: taskId, notes })
+      return { task_id: taskId, notes: record.notes }
+    },
+  })
+
   return () => {
     for (const dispose of disposers) dispose()
   }
@@ -922,6 +1166,16 @@ function requireId(input: Record<string, unknown>): string {
 }
 
 /**
+ * @param {Record<string, unknown>} input - a request body that may name a stage.
+ * @returns {number | undefined} the 1-based stage number, when it is usable.
+ */
+function optionalOrdinal(input: Record<string, unknown>): number | undefined {
+  const raw = input.ordinal
+  const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN
+  return Number.isInteger(value) && value > 0 ? value : undefined
+}
+
+/**
  * Mount the plugin: one HTTP route for the panel, four tools for the agent, and
  * the automatic runner behind both.
  * @param {HostContext} ctx - the host Cordis context.
@@ -931,11 +1185,29 @@ export function apply(ctx: HostContext): void {
   const store = createTaskStore()
   const runner: TaskRunner = createRunner(ctx, store)
 
+  /**
+   * Fill in a workspace's directory when the caller only named its id.
+   * @param {TaskCreatePayload} [input] - the requested task.
+   * @returns {Promise<TaskCreatePayload>} the input, with a path when one is known.
+   */
+  async function withWorkspacePath(input: TaskCreatePayload = {}): Promise<TaskCreatePayload> {
+    const given = typeof input.workspacePath === 'string' ? input.workspacePath.trim() : ''
+    if (given !== '') return input
+    const workspaceId = typeof input.workspaceId === 'string' ? input.workspaceId.trim() : ''
+    if (workspaceId === '') return input
+    const registry = service<HostWorkspaceRegistry>(ctx, 'workspaceRegistry')
+    const found = registry?.list().find(workspace => workspace.id === workspaceId)
+    if (found === undefined) return input
+    return { ...input, workspacePath: found.path }
+  }
+
   /** Every mutation the panel or a tool makes feeds the auto-run gate. */
   const watched: TaskStore = {
     ...store,
     create: async input => {
-      const record = await store.create(input)
+      // A task that names a workspace also needs that workspace's directory:
+      // stage documents and the approval gate both resolve paths against it.
+      const record = await store.create(await withWorkspacePath(input))
       runner.onTaskChanged(record)
       return record
     },
@@ -1017,6 +1289,14 @@ export function apply(ctx: HostContext): void {
     emptyTrash: () => watched.emptyTrash(),
     run: input => runner.start(requireId(input)),
     cancelRun: input => runner.cancel(requireId(input)),
+    approveStage: input => runner.approveStage(requireId(input), optionalOrdinal(input)),
+    rejectStage: input =>
+      runner.rejectStage(
+        requireId(input),
+        optionalOrdinal(input),
+        typeof input.feedback === 'string' ? input.feedback : undefined,
+      ),
+    stageDoc: input => runner.stageDoc(requireId(input), optionalOrdinal(input)),
     settings: async () => ({
       ...(await runner.settings()),
       ...runner.stats(),

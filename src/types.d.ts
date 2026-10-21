@@ -17,6 +17,9 @@ type TaskPriority = 'low' | 'normal' | 'high' | 'urgent'
 /** Lifecycle of one automatic agent run attached to a task. */
 type TaskRunStatus = 'queued' | 'running' | 'done' | 'failed'
 
+/** Which half of the staged workflow a run belongs to. */
+type TaskRunKind = 'plan' | 'execute'
+
 /** One automatic agent run: which session ran the task, and how it ended. */
 interface TaskRun {
   /** Session the plugin created for this run, or null while queued. */
@@ -28,6 +31,32 @@ interface TaskRun {
   message: string | null
   /** 1 on the first launch; grows with each retry. */
   attempts: number
+  /** Planning or execution; defaults to execution for rows written before stages. */
+  kind?: TaskRunKind
+}
+
+/** Where a stage sits in the document-then-execute flow. */
+type TaskStageStatus = 'draft' | 'awaiting-approval' | 'approved' | 'running' | 'done' | 'failed'
+
+/** One stage of a task: a document to approve, then work to do inside its scope. */
+interface TaskStage {
+  /** 1-based ordinal, also the number in the document file name. */
+  index: number
+  title: string
+  goal: string
+  /** Workspace-relative POSIX path: docs/task-center/<taskId>/stage-<n>.md */
+  docPath: string
+  /** Files or directories the agent may touch; relative to the workspace or absolute. */
+  scope: string[]
+  /** Commands that must all exit 0 before the stage counts as done. */
+  verify: string[]
+  status: TaskStageStatus
+  /** Failure text or the closing note. */
+  message: string | null
+  /** Tail of the verification output. */
+  output: string | null
+  startedAt: number | null
+  endedAt: number | null
 }
 
 /** One normalized task row, exactly as it is stored on disk. */
@@ -50,6 +79,10 @@ interface TaskRecord {
   cwd: string | null
   /** Latest automatic run, or null when the task was never run. */
   run: TaskRun | null
+  /** Ordered stages; empty on rows written before the staged workflow. */
+  stages: TaskStage[]
+  /** 0-based index of the current stage; equals `stages.length` once all are done. */
+  stageIndex: number
   /** Ids of tasks that must reach `done` before this one may run. */
   blockedBy: string[]
   /** Answer this task's in-workspace approvals without asking the user. */
@@ -99,6 +132,10 @@ interface TaskUpdateInput {
   autoApprove?: boolean
   /** Written by the runner only, never by a caller patching content. */
   run?: TaskRun | null
+  /** Written by the planning flow only. */
+  stages?: TaskStage[]
+  /** Written by the stage advance logic only. */
+  stageIndex?: number
 }
 
 /** One trashed tree as reported to the UI. */

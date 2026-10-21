@@ -83,7 +83,21 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 - **自查计数**：`settings` 里回 `autoSeen` / `autoApproved` / `autoBlocked` / `autoDelegated`。`autoSeen` 是「审批请求到底有没有走到本插件」——`autoApproved` 为 0 时，它能把「压根没触发审批」和「触发了但没走到我们」区分开。
 - **注意**：工作区内的读写通常**根本不会触发审批**——沙箱在 `workspace-write` 下直接放行，`auto` 预设是 `danger-full-access` 也一样。所以这个开关实际管的是「越界升级」那一次询问：拦下它，任务就真的出不了工作区。为了让这条边界真的存在，开着自动批准的任务如果挑到 `danger-full-access` 一类的预设，会被**收窄到 `workspace-write`**（`settings.notes` 里会记一条 `preset auto 收窄到 workspace-write`）。
 
-任务多了六个字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）、`blockedBy`（前置任务 id）、`autoApprove`（工作区内自动批准）与 `run`（`{sessionId, status: queued|running|done|failed, startedAt, endedAt, message, attempts}`）。
+任务多了这些字段：`workspaceId` / `workspacePath`（归属工作区）、`permission`（任务级预设，空为跟随全局）、`cwd`（老式工作目录兜底）、`blockedBy`（前置任务 id）、`autoApprove`（工作区内自动批准）、`run`（`{sessionId, status: queued|running|done|failed, startedAt, endedAt, message, attempts, kind: plan|execute}`）与 `stages` / `stageIndex`（阶段列表与当前阶段）。`stages` 里每项是 `{index, title, goal, docPath, scope, verify, status, message, output, startedAt, endedAt}`，状态取 `draft` / `awaiting-approval` / `approved` / `running` / `done` / `failed`。
+
+### 阶段：先写文档，批准后执行
+
+每个任务由若干**阶段**组成，阶段必须**先有文档、经你点批准、才会执行**。这是硬拦截，不是提示词里的自觉。
+
+- **规划**：点 ▶ 时，如果当前阶段还没有文档，插件起一个 `plan` 会话，只让它写文档（提示词明确禁止改代码），并要求它调 `task_stage_plan` 把这个阶段拆成 1–6 步，每步给出允许改动的路径和验收命令
+- **文档落盘**：文档写在任务工作区的 `docs/task-center/<任务id>/stage-<n>.md`，内容由插件渲染成固定模板（标题 / 目标 / 允许改动 / 步骤 / 验收），所以格式永远一致
+- **人工闸门**：文档写完，阶段停在「待批准」，卡片上出现「待批准」徽章。抽屉里能看阶段列表、预览文档全文，**批准**之后下一次开跑才会进入 `execute`
+- **执行**：`execute` 会话的提示词里注入文档全文 + 允许改动 + 验收命令，并要求它按文档执行
+- **硬边界**：执行期间的写、删、命令类工具调用，参数里的路径必须落在该阶段的允许改动里；`..`、`~`、`rm/del/rd/format/mkfs/shutdown/reboot` 这类命令直接**拒绝**，并让 agent 重新计划（`settings.autoBlocked` 递增）
+- **验收**：会话空闲后插件按文档里的验收命令逐条跑（默认 120 秒超时）；退出码 0 才算这个阶段完成，然后进入下一阶段；非 0、超时、命令不存在都记 `failed`，输出截断后写进 `stage.output`
+- **完成**：最后一个阶段 done，任务自动转 done
+- **驳回**：点「驳回」把阶段退回 `draft` 并删掉旧文档，下一次开跑重新规划
+- **老任务迁移**：没有阶段的旧任务会自动补一个「实现 <标题>」的 `draft` 阶段
 
 ### agent 工具
 
@@ -94,6 +108,8 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 | `task_create` | 新建任务 | `title`（必填）/ `notes` / `status` / `priority` / `due` / `tags` / `parent_id` / `workspace_id` / `permission` / `blocked_by` |
 | `task_update` | 只改传入的字段 | `id`（必填）+ 同上各字段，`due`、`parent_id`、`workspace_id`、`permission` 可传 `null` 清空，`blocked_by` 传空数组清空 |
 | `task_delete` | 删除任务（默认进回收站） | `id`（必填）/ `permanent` |
+| `task_stage_plan` | 用规划阶段拆出的步骤替换当前阶段 | `id`（必填）/ `stages`（`[{title, goal, scope, verify}]`，1–6 条）/ `summary` |
+| `task_stage_report` | 把一句执行结论追加到任务说明 | `id`（必填）/ `summary` |
 
 状态：`todo` `doing` `blocked` `done`；优先级：`low` `normal` `high` `urgent`。
 
@@ -109,6 +125,7 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 | `workspaces` / `createWorkspace` | 列出可选工作区 / 把某个绝对路径登记成工作区 |
 | `permissions` | 宿主提供的权限预设列表（`{options, defaultPreset, available}`） |
 | `settings` / `saveSettings` | 读/写 `{autoRun, concurrency, preset, timeoutMinutes, retries}`，`settings` 另回 `available`（宿主有没有会话服务） |
+| `stageDoc` / `approveStage` / `rejectStage` | 读某个阶段的文档 / 批准它 / 驳回并退回规划；后两个参数 `{id, ordinal}` |
 
 设置存放在任务文件旁边的 `settings.json`，同样走原子写入。
 
@@ -119,6 +136,7 @@ git clone https://github.com/Mashiro707/dsh-task-center.git
 - 写入走「临时文件 + rename」，避免半个文件
 - 读到损坏的 JSON 会先备份成 `tasks.json.corrupt-<时间戳>`，再重建空文档
 - 删除是软删除（记 `deletedAt`），彻底清除才真正移除
+- 阶段文档写在任务工作区的 `docs/task-center/<任务id>/stage-<n>.md`，是普通 Markdown 文件，可以直接用编辑器改（改完仍是「待批准」，重跑会按新内容执行）
 
 ## 开发
 

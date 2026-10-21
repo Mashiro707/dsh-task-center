@@ -201,3 +201,16 @@ test('queues, timeouts and blockers are all visible in the panel', () => {
   assert.match(source, /blockedBy: next\.blockedBy/, 'the drawer must save the blockers it picked')
   assert.match(css, /\.tc-blocker-on\{/, 'a picked blocker needs a visible state')
 })
+
+test('a stage shows its document and waits for an approval click', () => {
+  assert.match(source, /t\('groupStages'\)/, 'the drawer needs a stages group')
+  assert.match(source, /t\('awaitBadge'\)/, 'a waiting stage must say so on the card')
+  assert.match(css, /\.tc-stagebar\{/, 'the card carries a stage progress bar')
+  assert.match(css, /\.tc-stagelist\{/, 'the drawer lists the stages')
+  assert.match(css, /\.tc-sdot-awaitingapproval\{/, 'a waiting stage needs its own dot colour')
+  assert.match(css, /\.tc-doc\{/, 'the document preview needs a read-only surface')
+  assert.match(source, /'approveStage'/, 'approving is a host call')
+  assert.match(source, /'rejectStage'/, 'rejecting is a host call')
+  assert.match(source, /onStageDoc/, 'the document is fetched, not inlined')
+  assert.match(source, /onStageAction/, 'the drawer asks the page to approve or reject')
+})

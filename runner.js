@@ -9,8 +9,10 @@
  * profile root.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
+import { currentStage, readStageDoc, stageAbsPath } from './stages.js';
+import { DEFAULT_VERIFY_TIMEOUT_MS, runVerifyCommands } from './verify.js';
 /** How many runs may be alive at once when the caller asks for no particular cap. */
 const MAX_CONCURRENCY = 4;
 /** Preset that reviews each call before it runs; the closest thing to unattended. */
@@ -104,6 +106,72 @@ export function buildPrompt(task, cwd, board = []) {
     ].join('\n');
 }
 /**
+ * Render the planning prompt: study the workspace, split the task into stages,
+ * submit them as documents. No code may change in this mode.
+ * @param {TaskRecord} task - the task being planned.
+ * @param {string} cwd - working directory the session starts in.
+ * @param {TaskStage} stage - the draft stage being planned.
+ * @returns {string} the prompt.
+ */
+export function buildPlanPrompt(task, cwd, stage) {
+    return [
+        '你是任务中心自动拉起的规划智能体。这一轮只写文档，不改代码。',
+        '',
+        `任务 ID：${task.id}`,
+        `标题：${task.title}`,
+        `阶段序号：${stage.index}　阶段标题：${stage.title}`,
+        `工作目录：${cwd}`,
+        `文档将写到：${stage.docPath}`,
+        '',
+        '说明：',
+        task.notes.trim() === '' ? '（无）' : task.notes.trim(),
+        '',
+        '要求：',
+        `1. 先读工作目录里的代码，弄清楚这个任务到底要改哪些文件、分几步做完。`,
+        `2. 把任务拆成 1 到 12 个阶段，每个阶段都必须能独立验收。`,
+        `3. 每个阶段给出：title、goal、scope（允许改动的文件或目录，相对工作目录）、verify（验收命令，必须能在这台机器上跑）、steps（做法要点）。`,
+        `4. 用 task_stage_plan 一次性提交全部阶段：task_id 填 ${task.id}。`,
+        '5. 不要修改任何代码或配置；这一轮的任何写入都会被闸门拒绝。',
+        '6. 提交后本轮就结束，等人在面板上批准阶段 1。',
+    ].join('\n');
+}
+/**
+ * Render the execution prompt: the stage document is the whole contract.
+ * @param {TaskRecord} task - the task being executed.
+ * @param {string} cwd - working directory the session starts in.
+ * @param {TaskStage} stage - the approved stage.
+ * @param {string} docText - that stage's document, verbatim.
+ * @param {TaskRecord[]} board - every live task, used to name the blockers.
+ * @returns {string} the prompt.
+ */
+export function buildStagePrompt(task, cwd, stage, docText, board = []) {
+    const finished = (task.blockedBy ?? [])
+        .map(id => board.find(entry => entry.id === id))
+        .filter((entry) => entry !== undefined)
+        .map(entry => `- ${entry.id} ${entry.title}`);
+    return [
+        '你是任务中心自动拉起的执行智能体。这一轮只做当前阶段，严格按文档来。',
+        '',
+        `任务 ID：${task.id}`,
+        `标题：${task.title}`,
+        `阶段 ${stage.index}：${stage.title}`,
+        `工作目录：${cwd}`,
+        `允许改动：${stage.scope.length === 0 ? '（无，只能读取）' : stage.scope.join('、')}`,
+        ...(finished.length === 0 ? [] : ['前置任务（都已完成）：', ...finished]),
+        '',
+        '===== 阶段文档（这是唯一的执行依据）=====',
+        docText.trim(),
+        '===== 文档结束 =====',
+        '',
+        '要求：',
+        '1. 严格按上面的文档执行；文档没允许的文件一律不要写。越界会被闸门拒绝，并让你重新计划。',
+        '2. 文档里的验收命令必须真的能跑通；跑不跑得通由宿主执行，不看你的自述。',
+        `3. 结束时调用 task_stage_report：task_id 填 ${task.id}，summary 写一句话结果。`,
+        '4. 如果做不到或被卡住，也调用 task_stage_report，并在 summary 里写清楚卡在哪里。',
+        '5. 不要修改文档本身，不要删除任务。',
+    ].join('\n');
+}
+/**
  * Coerce anything into a usable settings object.
  * @param {unknown} raw - parsed file contents.
  * @returns {RunnerSettings} normalized settings.
@@ -193,6 +261,20 @@ function isInsideRoot(candidate, root) {
     return target.startsWith(`${base}/`);
 }
 /**
+ * Whether a path exists on disk.
+ * @param {string} path - absolute path.
+ * @returns {Promise<boolean>} true when it can be stat'ed.
+ */
+async function fileExists(path) {
+    try {
+        await stat(path);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/**
  * Flatten one argument tree into the text the path scan reads.
  * @param {unknown} args - the tool-call arguments.
  * @returns {string} JSON or the raw string.
@@ -244,6 +326,69 @@ function classifyCall(args, root) {
     return 'inside';
 }
 /**
+ * Pull the file a write-style call is aimed at, when the arguments name one.
+ * @param {unknown} args - the tool-call arguments.
+ * @returns {string | null} the raw path string.
+ */
+function namedPath(args) {
+    if (args === null || typeof args !== 'object' || Array.isArray(args))
+        return null;
+    const source = args;
+    for (const key of ['path', 'file_path', 'filePath', 'filename', 'file', 'target', 'destination', 'source']) {
+        const value = source[key];
+        if (typeof value === 'string' && value.trim() !== '')
+            return value.trim();
+    }
+    return null;
+}
+/** Command shapes that must never run inside a stage. */
+const DANGEROUS_COMMAND = [
+    /(?:^|[\s;&|])(?:rm|rmdir)\s+(?:-[a-z]+\s+)*(?:\/|~|[A-Za-z]:)/i,
+    /(?:^|[\s;&|])del\s+\/[a-z]/i,
+    /(?:^|[\s;&|])rd\s+\/[a-z]/i,
+    /(?:^|[\s;&|])format\s+[a-z]:/i,
+    /(?:^|[\s;&|])(?:mkfs|shutdown|reboot)/i,
+];
+/**
+ * Decide whether one call stays inside a stage's declared scope.
+ * @param {unknown} args - the tool-call arguments.
+ * @param {string} root - the workspace directory.
+ * @param {string[]} scope - allowed files or directories, relative or absolute.
+ * @returns {'inside' | 'outside' | 'unknown'} the verdict.
+ */
+function classifyScoped(args, root, scope) {
+    if (normalizePath(root) === '')
+        return 'unknown';
+    if (scope.length === 0)
+        return 'outside';
+    const text = serializeArgs(args);
+    if (/(?:^|[\s"'(=,;])~(?:\/|\\|\s|$)/.test(text))
+        return 'outside';
+    if (/(?:^|[\\/\s"'=;])\.\.(?:[\\/]|[\s"'=;&|)]|$)/.test(text))
+        return 'outside';
+    for (const pattern of DANGEROUS_COMMAND) {
+        if (pattern.test(text))
+            return 'outside';
+    }
+    const allowed = (candidate) => scope.some(entry => {
+        const resolved = isAbsolute(entry) ? entry : join(root, entry);
+        return isInsideRoot(candidate, resolved);
+    });
+    const named = namedPath(args);
+    if (named !== null) {
+        const absolute = isAbsolute(named) ? named : join(root, named);
+        return allowed(absolute) ? 'inside' : 'outside';
+    }
+    const paths = collectPaths(text);
+    if (paths.length === 0)
+        return 'unknown';
+    for (const path of paths) {
+        if (!allowed(path))
+            return 'outside';
+    }
+    return 'inside';
+}
+/**
  * Build one runner bound to a store and the live host context.
  * @param {HostContext} ctx - host context.
  * @param {RunnerStore} store - the shared store.
@@ -267,6 +412,8 @@ export function createRunner(ctx, store) {
     const pendingCalls = new Map();
     /** Sessions that reported idle before this runner knew which task owns them. */
     const earlyIdle = new Set();
+    /** Outcomes that arrived before the run row they belong to was written. */
+    const pendingSettle = new Map();
     let settings = null;
     const approvals = { approved: 0, blocked: 0, delegated: 0, seen: 0 };
     // Counted so a stuck "running" row can be explained from the outside: either
@@ -371,16 +518,184 @@ export function createRunner(ctx, store) {
         }
     }
     /**
+     * The directory a task is allowed to work in.
+     * @param {TaskRecord} task - the task.
+     * @returns {string} an absolute path, or '' when the task has none.
+     */
+    function workspaceRoot(task) {
+        return (task.workspacePath ?? task.cwd ?? '').trim();
+    }
+    /**
+     * Write one stage back to its task.
+     * @param {string} taskId - the task owning the stage.
+     * @param {number} ordinal - 1-based stage number.
+     * @param {Partial<TaskStage>} patch - fields to replace.
+     * @returns {Promise<void>} resolves once the store is updated.
+     */
+    async function patchStage(taskId, ordinal, patch) {
+        const board = await store.list();
+        const task = board.tasks.find(entry => entry.id === taskId);
+        if (task === undefined)
+            return;
+        const stages = task.stages.map(stage => (stage.index === ordinal ? { ...stage, ...patch } : stage));
+        await store.update({ id: taskId, stages });
+    }
+    /**
+     * Decide what one run does: write the next stage document, or execute one
+     * that a person approved.
+     *
+     * A stage whose document already exists means planning finished earlier, so
+     * the only way forward is the approval — the run refuses instead of quietly
+     * planning again.
+     * @param {TaskRecord} task - the task to run.
+     * @returns {Promise<{kind: TaskRunKind, stage: TaskStage}>} the run's shape.
+     */
+    async function resolveMode(task) {
+        const stage = currentStage(task);
+        if (stage === null)
+            throw runnerError('no-stage', '这个任务没有待执行的阶段。');
+        if (stage.status === 'running')
+            throw runnerError('running', '这个任务的阶段正在执行。');
+        if (stage.status === 'awaiting-approval') {
+            throw runnerError('awaiting-approval', `阶段 ${stage.index} 的文档已经写好，等你在面板上批准。`);
+        }
+        if (stage.status === 'done')
+            throw runnerError('no-stage', '当前阶段已经完成，没有待执行的阶段。');
+        if (stage.status === 'draft') {
+            const root = workspaceRoot(task);
+            const ready = root !== '' && (await fileExists(stageAbsPath(root, stage.docPath)));
+            if (ready) {
+                await patchStage(task.id, stage.index, { status: 'awaiting-approval' });
+                throw runnerError('awaiting-approval', `阶段 ${stage.index} 的文档已经写好，等你在面板上批准。`);
+            }
+            return { kind: 'plan', stage };
+        }
+        if (stage.status === 'failed') {
+            // A retry repeats what failed: planning when there is no document yet,
+            // execution when the document survived.
+            const root = workspaceRoot(task);
+            const ready = root !== '' && (await fileExists(stageAbsPath(root, stage.docPath)));
+            if (ready) {
+                await patchStage(task.id, stage.index, { status: 'approved', message: null });
+                return { kind: 'execute', stage: { ...stage, status: 'approved' } };
+            }
+            await patchStage(task.id, stage.index, { status: 'draft', message: null });
+            return { kind: 'plan', stage: { ...stage, status: 'draft' } };
+        }
+        return { kind: 'execute', stage: { ...stage, status: 'approved' } };
+    }
+    /**
+     * Close the books on one finished run: verify the stage, advance the plan.
+     * @param {TaskRecord} task - the task as it stood when the run started.
+     * @param {TaskRunKind} kind - planning or execution.
+     * @param {boolean} passed - whether the session ended without an error.
+     * @param {string | null} message - why it ended, when it failed.
+     * @returns {Promise<void>} resolves once the board is updated.
+     */
+    async function finishStage(task, kind, passed, message) {
+        const stage = currentStage(task);
+        if (stage === null)
+            return;
+        if (kind === 'plan') {
+            // A plan tool call leaves the stage in `awaiting-approval`; anything still
+            // `running` or `draft` means the agent never produced a document.
+            if (stage.status === 'running' || stage.status === 'draft') {
+                await patchStage(task.id, stage.index, {
+                    status: 'failed',
+                    message: message ?? '规划结束，但没有提交阶段文档。',
+                    endedAt: Date.now(),
+                });
+            }
+            return;
+        }
+        if (stage.status !== 'running' && stage.status !== 'approved')
+            return;
+        if (!passed) {
+            await patchStage(task.id, stage.index, { status: 'failed', message: message ?? '执行失败。', endedAt: Date.now() });
+            return;
+        }
+        if (stage.verify.length === 0) {
+            await patchStage(task.id, stage.index, {
+                status: 'failed',
+                message: '阶段文档没有声明验收命令，没法判定这一步已经做完。',
+                endedAt: Date.now(),
+            });
+            return;
+        }
+        const root = workspaceRoot(task);
+        let outcomes = [];
+        try {
+            outcomes = await runVerifyCommands(stage.verify, root, DEFAULT_VERIFY_TIMEOUT_MS);
+        }
+        catch (error) {
+            await patchStage(task.id, stage.index, {
+                status: 'failed',
+                message: `验收命令没能跑起来：${describe(error)}`,
+                endedAt: Date.now(),
+            });
+            return;
+        }
+        const failure = outcomes.find(outcome => !outcome.ok);
+        if (failure !== undefined) {
+            await patchStage(task.id, stage.index, {
+                status: 'failed',
+                message: `验收没通过：${failure.command}${failure.timedOut ? '（超时）' : ''}`,
+                output: failure.output,
+                endedAt: Date.now(),
+            });
+            return;
+        }
+        const output = outcomes
+            .map(outcome => `$ ${outcome.command}\n${outcome.output}`)
+            .join('\n\n')
+            .slice(0, 4000);
+        await advanceStage(task, stage, output);
+    }
+    /**
+     * Mark one stage done and open the review of the next one.
+     * @param {TaskRecord} task - the task owning the stage.
+     * @param {TaskStage} stage - the stage that passed.
+     * @param {string} output - the verification output to keep.
+     * @returns {Promise<void>} resolves once the board is updated.
+     */
+    async function advanceStage(task, stage, output) {
+        const board = await store.list();
+        const current = board.tasks.find(entry => entry.id === task.id);
+        if (current === undefined)
+            return;
+        const nextIndex = current.stageIndex + 1;
+        const stages = current.stages.map((entry, position) => {
+            if (position === current.stageIndex) {
+                return { ...entry, status: 'done', message: null, output, endedAt: Date.now() };
+            }
+            if (position === nextIndex && entry.status === 'draft') {
+                return { ...entry, status: 'awaiting-approval' };
+            }
+            return entry;
+        });
+        const finished = nextIndex >= stages.length;
+        await store.update({
+            id: current.id,
+            stages,
+            stageIndex: finished ? current.stageIndex : nextIndex,
+            ...(finished ? { status: 'done' } : {}),
+        });
+        note(`stage ${stage.index} done`);
+        if (!finished)
+            ctx.logger?.info?.(`[task-center] 阶段 ${stage.index} 验收通过，下一步等批准。`);
+    }
+    /**
      * Record the end of one attempt, then retry it when the settings allow.
      * @param {string} taskId - task being run.
      * @param {string} sessionId - the attempt's session.
      * @param {TaskRunStatus} status - how it ended.
      * @param {string | null} message - failure text.
-     * @param {{retry?: boolean}} options - whether a retry is allowed.
+     * @param {{retry?: boolean, force?: boolean}} options - whether a retry is
+     *   allowed, and whether to apply an outcome saved before its row existed.
      * @returns {Promise<void>} resolves once the store is updated.
      */
     async function settle(taskId, sessionId, status, message, options = {}) {
-        if (sessionToTask.get(sessionId) !== taskId) {
+        if (options.force !== true && sessionToTask.get(sessionId) !== taskId) {
             note(`settle ${taskId}: 会话已不在本 runner 名下`);
             return;
         }
@@ -405,6 +720,13 @@ export function createRunner(ctx, store) {
             const task = board.tasks.find(entry => entry.id === taskId);
             const run = task?.run ?? null;
             if (task === undefined || run === null || run.sessionId !== sessionId) {
+                // The row may simply not be written yet: `admit` records the session
+                // before it writes the run, so an idle in that window must not be lost.
+                if (run === null && pendingSettle.size < 64) {
+                    pendingSettle.set(sessionId, { status, message, retry: options.retry === true });
+                    note(`settle ${taskId}: 任务行还没写，先记下结果`);
+                    return;
+                }
                 note(`settle ${taskId}: 任务行已被替换（${run?.sessionId ?? 'null'}）`);
                 return;
             }
@@ -414,6 +736,9 @@ export function createRunner(ctx, store) {
                 id: taskId,
                 run: { ...run, status, endedAt: Date.now(), message },
             });
+            // The stage decides what happens next: verify it, advance, or record the
+            // failure. Only after that row is on disk, so a crash cannot skip it.
+            await finishStage(task, run.kind ?? 'execute', status === 'done', message);
         }
         catch (error) {
             ctx.logger?.warn?.(`[task-center] 运行结果没能写回任务 ${taskId}：${describe(error)}`);
@@ -501,6 +826,10 @@ export function createRunner(ctx, store) {
         const workspaceId = (task.workspaceId ?? '').trim();
         const cwd = (task.cwd ?? '').trim();
         const attempt = (task.run?.attempts ?? 0) + 1;
+        const root = workspaceRoot(task);
+        if (root === '')
+            throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。');
+        const mode = await resolveMode(task);
         // Exactly one of the two: the Host rejects a request naming both.
         const created = await controller.create(workspaceId === '' ? { cwd } : { workspaceId });
         // A cancel that landed while the session was being created wins: stop the
@@ -516,6 +845,7 @@ export function createRunner(ctx, store) {
                     endedAt: Date.now(),
                     message: '已取消',
                     attempts: attempt,
+                    kind: mode.kind,
                 },
             });
         }
@@ -529,8 +859,24 @@ export function createRunner(ctx, store) {
         // Register before the prompt: the agent may flip to running immediately.
         sessionToTask.set(agent.id, task.id);
         taskToSession.set(task.id, agent.id);
+        let prompt = '';
         try {
-            agent.followup(createUserMessage(buildPrompt(task, workspaceId === '' ? cwd : task.workspacePath ?? cwd, board)));
+            if (mode.kind === 'plan') {
+                prompt = buildPlanPrompt(task, workspaceId === '' ? cwd : root, mode.stage);
+            }
+            else {
+                const docText = await readStageDoc(root, mode.stage.docPath);
+                prompt = buildStagePrompt(task, workspaceId === '' ? cwd : root, mode.stage, docText, board);
+            }
+        }
+        catch (error) {
+            sessionToTask.delete(agent.id);
+            taskToSession.delete(task.id);
+            throw runnerError('doc-missing', `读不到阶段文档 ${mode.stage.docPath}：${describe(error)}`);
+        }
+        await patchStage(task.id, mode.stage.index, { status: 'running', startedAt: Date.now() });
+        try {
+            agent.followup(createUserMessage(prompt));
         }
         catch (error) {
             sessionToTask.delete(agent.id);
@@ -557,11 +903,19 @@ export function createRunner(ctx, store) {
                 endedAt: null,
                 message: null,
                 attempts: attempt,
+                kind: mode.kind,
             },
         });
-        // The session may have reported idle before this row existed; honour it now.
-        if (earlyIdle.delete(agent.id))
+        // An outcome may have arrived before this row existed; honour it now.
+        const pending = pendingSettle.get(agent.id);
+        if (pending !== undefined) {
+            pendingSettle.delete(agent.id);
+            void settle(task.id, agent.id, pending.status, pending.message, { retry: pending.retry, force: true });
+        }
+        else if (earlyIdle.delete(agent.id)) {
+            // The session may have reported idle before this row existed.
             void settle(task.id, agent.id, 'done', null);
+        }
         return record;
     }
     /**
@@ -660,13 +1014,16 @@ export function createRunner(ctx, store) {
             return enqueue(task);
         const workspaceId = (task.workspaceId ?? '').trim();
         const cwd = (task.cwd ?? '').trim();
-        if (workspaceId === '' && cwd === '') {
+        if (workspaceId === '' && cwd === '' && workspaceRoot(task) === '') {
             throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。');
         }
         const blockers = pendingBlockers(task, board.tasks);
         if (blockers.length > 0) {
             throw runnerError('blocked', `还有 ${blockers.length} 个前置任务没完成：${blockers.map(entry => entry.title).join('、')}`);
         }
+        // Refuse here rather than in `admit`, so a queued task never sits in the
+        // queue waiting to discover it still needs a plan approved.
+        await resolveMode(task);
         const config = await readSettings();
         if (taskToSession.size >= config.concurrency)
             return enqueue(task);
@@ -805,23 +1162,32 @@ export function createRunner(ctx, store) {
     }
     /**
      * Find the task that owns a session this runner has not mapped yet.
+     *
+     * Retried for a short while: an idle that beats the mapping usually arrives
+     * while `admit` is still between "session created" and "row written", so the
+     * row shows up a few milliseconds later.
      * @param {string} sessionId - the session that went idle.
+     * @param {number} [tries] - how many times to look before giving up.
      * @returns {Promise<string | undefined>} the owning task id, when found.
      */
-    async function adopt(sessionId) {
-        try {
-            const board = await store.list();
-            const owner = board.tasks.find(entry => entry.run !== null && entry.run.sessionId === sessionId && entry.run.status === 'running');
-            if (owner === undefined)
+    async function adopt(sessionId, tries = 12) {
+        for (let attempt = 0; attempt < tries; attempt += 1) {
+            try {
+                const board = await store.list();
+                const owner = board.tasks.find(entry => entry.run !== null && entry.run.sessionId === sessionId && entry.run.status === 'running');
+                if (owner !== undefined) {
+                    sessionToTask.set(sessionId, owner.id);
+                    taskToSession.set(owner.id, sessionId);
+                    note(`adopted ${owner.id} from ${sessionId}`);
+                    return owner.id;
+                }
+            }
+            catch {
                 return undefined;
-            sessionToTask.set(sessionId, owner.id);
-            taskToSession.set(owner.id, sessionId);
-            note(`adopted ${owner.id} from ${sessionId}`);
-            return owner.id;
+            }
+            await new Promise(resolve => setTimeout(resolve, 15));
         }
-        catch {
-            return undefined;
-        }
+        return undefined;
     }
     function onAgentError(payload, scope) {
         const sessionId = payload?.agent?.id ?? '';
@@ -901,13 +1267,19 @@ export function createRunner(ctx, store) {
                 const task = board.tasks.find(entry => entry.id === taskId);
                 if (task === undefined || task.autoApprove !== true)
                     return await next();
-                const root = (task.workspacePath ?? task.cwd ?? '').trim();
+                const root = workspaceRoot(task);
                 if (root === '')
                     return await next();
                 const call = request.callId === undefined ? undefined : pendingCalls.get(request.callId);
                 if (call === undefined)
                     return await next();
-                const verdict = classifyCall(call.args, root);
+                // Planning only reads: anything that needs approval while a plan is
+                // being written is judged by the workspace rule, because no stage has
+                // declared a narrower scope yet.
+                const stage = currentStage(task);
+                const verdict = (task.run?.kind ?? 'execute') !== 'plan' && stage !== null && stage.scope.length > 0
+                    ? classifyScoped(call.args, root, stage.scope)
+                    : classifyCall(call.args, root);
                 if (verdict !== 'inside') {
                     if (verdict === 'outside') {
                         // A task scoped to a workspace must not reach past it, and this
@@ -916,15 +1288,15 @@ export function createRunner(ctx, store) {
                         // workspace" stays true; an `unknown` verdict still asks a person.
                         approvals.blocked += 1;
                         note(`approval blocked outside ${request.toolName}`);
-                        ctx.logger?.info?.(`[task-center] ${request.toolName} 越过工作区，已拒绝（任务 ${taskId}）。`);
+                        ctx.logger?.info?.(`[task-center] ${request.toolName} 脱离当前阶段范围，已拒绝（任务 ${taskId}）。`);
                         return 'rejected';
                     }
                     approvals.delegated += 1;
-                    ctx.logger?.info?.(`[task-center] 无法判断 ${request.toolName} 是否在工作区内，交给你确认。`);
+                    ctx.logger?.info?.(`[task-center] 无法判断 ${request.toolName} 是否在范围内，交给你确认。`);
                     return await next();
                 }
                 approvals.approved += 1;
-                ctx.logger?.info?.(`[task-center] 工作区内自动批准 ${request.toolName}（任务 ${taskId}）。`);
+                ctx.logger?.info?.(`[task-center] 阶段范围内自动批准 ${request.toolName}（任务 ${taskId}）。`);
                 return 'allowed-once';
             }
             catch (error) {
@@ -949,6 +1321,63 @@ export function createRunner(ctx, store) {
     }
     return {
         start,
+        async approveStage(taskId, ordinal) {
+            const board = await store.list();
+            const task = board.tasks.find(entry => entry.id === taskId);
+            if (task === undefined)
+                throw runnerError('not-found', `找不到任务 ${taskId}。`);
+            const position = ordinal === undefined ? (task.stageIndex < 0 ? 0 : task.stageIndex) : ordinal - 1;
+            const stage = task.stages[position];
+            if (stage === undefined)
+                throw runnerError('no-stage', `任务没有第 ${position + 1} 个阶段。`);
+            if (stage.status !== 'awaiting-approval' && stage.status !== 'failed') {
+                throw runnerError('not-awaiting', `阶段 ${stage.index} 现在是 ${stage.status}，不用批准。`);
+            }
+            const stages = task.stages.map((entry, index) => index === position ? { ...entry, status: 'approved', message: null } : entry);
+            await store.update({ id: taskId, stages, stageIndex: position });
+            note(`stage ${stage.index} approved`);
+            return start(taskId);
+        },
+        async rejectStage(taskId, ordinal, feedback) {
+            const board = await store.list();
+            const task = board.tasks.find(entry => entry.id === taskId);
+            if (task === undefined)
+                throw runnerError('not-found', `找不到任务 ${taskId}。`);
+            const position = ordinal === undefined ? (task.stageIndex < 0 ? 0 : task.stageIndex) : ordinal - 1;
+            const stage = task.stages[position];
+            if (stage === undefined)
+                throw runnerError('no-stage', `任务没有第 ${position + 1} 个阶段。`);
+            const reason = (feedback ?? '').trim() === '' ? '文档被驳回，请重新规划。' : feedback.trim();
+            const stages = task.stages.map((entry, index) => index === position ? { ...entry, status: 'draft', message: reason } : entry);
+            const updated = await store.update({ id: taskId, stages, stageIndex: position });
+            // Drop the rejected document: `resolveMode` treats an existing document as
+            // "waiting for approval", so leaving it behind would loop forever.
+            const root = workspaceRoot(task);
+            if (root !== '') {
+                try {
+                    await unlink(stageAbsPath(root, stage.docPath));
+                }
+                catch {
+                    // Already gone, or the workspace moved: planning recreates it anyway.
+                }
+            }
+            note(`stage ${stage.index} rejected`);
+            return updated;
+        },
+        async stageDoc(taskId, ordinal) {
+            const board = await store.list();
+            const task = board.tasks.find(entry => entry.id === taskId);
+            if (task === undefined)
+                throw runnerError('not-found', `找不到任务 ${taskId}。`);
+            const position = ordinal === undefined ? (task.stageIndex < 0 ? 0 : task.stageIndex) : ordinal - 1;
+            const stage = task.stages[position];
+            if (stage === undefined)
+                throw runnerError('no-stage', `任务没有第 ${position + 1} 个阶段。`);
+            const root = workspaceRoot(task);
+            if (root === '')
+                throw runnerError('workspace-missing', '这个任务还没有工作区。');
+            return { path: stage.docPath, text: await readStageDoc(root, stage.docPath) };
+        },
         async cancel(taskId) {
             const position = queue.indexOf(taskId);
             if (position >= 0) {

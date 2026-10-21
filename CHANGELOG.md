@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-21
+
+### Added
+
+- Tasks now run in stages. The first run only writes a document, the stage then
+  waits for an explicit approval click, and only then does a second run execute
+  the document. Writes, deletes and commands outside the document's declared
+  scope are refused, so "execute strictly per the document" is enforced rather
+  than suggested.
+- Stage documents are rendered from a fixed template and written to
+  `docs/task-center/<task id>/stage-<n>.md` inside the task workspace.
+- `task_stage_plan` and `task_stage_report` agent tools, plus `stageDoc`,
+  `approveStage` and `rejectStage` API routes.
+- Each stage carries its own verification commands; they run on a timeout and a
+  failing exit code marks the stage failed instead of trusting the agent.
+- The drawer lists the stages with approve and reject buttons, previews the
+  document, and the card shows stage progress.
+
+### Changed
+
+- `run.kind` distinguishes a planning run from an executing run, and a task
+  without stages is migrated to a single draft stage.
+
 ## [1.4.4] - 2026-10-21
 
 ### Fixed

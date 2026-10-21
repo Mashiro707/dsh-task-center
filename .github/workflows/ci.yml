@@ -44,4 +44,4 @@ jobs:
           cat test-output.log
 
       - name: Fail if committed artifacts are stale
-        run: git diff --exit-code -- index.js runner.js client.js
+        run: git diff --exit-code -- index.js runner.js stages.js verify.js client.js
