@@ -21,6 +21,34 @@ async function waitFor(check, timeout = 20000) {
 }
 
 /** A fake host: a session controller, presets, an event bus and a logger. */
+
+const SCHEMA_TYPES = ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']
+const SCHEMA_KEYWORDS = new Set(['type', 'oneOf', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const', 'description', 'title', 'default', 'examples'])
+
+/** Reject what `dsh-tools` rejects, so a bad tool schema fails here, not silently in the panel. */
+function checkSchema(node, path) {
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) throw new Error(`${path} must be a schema object`)
+  for (const key of Object.keys(node)) {
+    if (!SCHEMA_KEYWORDS.has(key)) throw new Error(`${path}.${key} is not a supported keyword`)
+  }
+  if (Object.hasOwn(node, 'type') && !SCHEMA_TYPES.includes(node.type)) {
+    throw new Error(`${path}.type must be one of ${SCHEMA_TYPES.join('/')}`)
+  }
+  if (node.properties !== undefined) {
+    for (const [key, child] of Object.entries(node.properties)) checkSchema(child, `${path}.properties.${key}`)
+  }
+  if (node.items !== undefined) checkSchema(node.items, `${path}.items`)
+  if (node.oneOf !== undefined) node.oneOf.forEach((child, index) => checkSchema(child, `${path}.oneOf[${index}]`))
+}
+
+function assertToolDefinition(definition) {
+  if (definition.output === undefined || typeof definition.output.render !== 'function') {
+    throw new Error(`tool "${definition.name}" must declare output { schema, render }`)
+  }
+  checkSchema(definition.output.schema, `tool "${definition.name}" output.schema`)
+  if (definition.parameters !== undefined) checkSchema(definition.parameters, `tool "${definition.name}" parameters`)
+}
+
 function makeHost(options = {}) {
   const listeners = new Map()
   const created = []
@@ -70,10 +98,17 @@ function makeHost(options = {}) {
     resolve: (name) => specs[name] ?? {},
   }
 
+  const toolNames = []
   const ctx = {
     logger: { warn() {}, info() {} },
     webServer: { register: () => () => {} },
-    tools: { register: () => () => {} },
+    tools: {
+      register(definition) {
+        assertToolDefinition(definition)
+        toolNames.push(definition.name)
+        return () => {}
+      },
+    },
     get(name) {
       if (name === 'sessionController') return controller
       if (name === 'permissionPresets') return presets
@@ -89,6 +124,7 @@ function makeHost(options = {}) {
 
   return {
     ctx,
+    toolNames,
     controller,
     presets,
     created,
@@ -1154,5 +1190,24 @@ test('rejecting a document sends the stage back to planning', async () => {
     assert.equal(rerun.run.kind, 'plan', 'a rejected stage goes back to planning')
   } finally {
     await dispose()
+  }
+})
+
+test('every agent tool satisfies the host schema subset', async () => {
+  const store = await makeStore()
+  const host = makeHost()
+  try {
+    apply(host.ctx)
+    assert.deepEqual(host.toolNames, [
+      'task_list',
+      'task_workspaces',
+      'task_create',
+      'task_update',
+      'task_delete',
+      'task_stage_plan',
+      'task_stage_report',
+    ])
+  } finally {
+    await store.dispose()
   }
 })

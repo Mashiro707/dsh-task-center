@@ -852,8 +852,14 @@ function renderJson(_args: unknown, value: unknown): { type: string; text: strin
   return [{ type: 'text', text: JSON.stringify(value, null, 2) }]
 }
 
-/** JSON-shaped tool output: the host renders the value as text. */
-const JSON_OUTPUT = { schema: { type: 'json' }, render: renderJson }
+/**
+ * JSON-shaped tool output: the host renders the value as text.
+ *
+ * The schema must stay inside the host's enforced JSON-schema subset — `json`
+ * is an authoring shorthand that `tools.register` rejects, and a rejected
+ * registration used to leave the whole tool set invisible to agents.
+ */
+const JSON_OUTPUT = { schema: { type: 'object', additionalProperties: true }, render: renderJson }
 
 /**
  * Publish the four agent tools against one store.
@@ -989,11 +995,11 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         notes: { type: 'string' },
         status: { type: 'string', enum: STATUSES },
         priority: { type: 'string', enum: PRIORITIES },
-        due: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear.' },
+        due: { type: 'string', description: 'YYYY-MM-DD, or empty string to clear.' },
         tags: { type: 'array', items: { type: 'string' } },
-        parent_id: { type: ['string', 'null'], description: 'Move under another top-level task, or null.' },
-        workspace_id: { type: ['string', 'null'], description: 'Move the task to another workspace, or null to clear.' },
-        permission: { type: ['string', 'null'], description: 'Permission preset name, or null to follow the global setting.' },
+        parent_id: { type: 'string', description: 'Move under another top-level task, or empty string to detach.' },
+        workspace_id: { type: 'string', description: 'Move the task to another workspace, or empty string to clear.' },
+        permission: { type: 'string', description: 'Permission preset name, or empty string to follow the global setting.' },
         blocked_by: {
           type: 'array',
           items: { type: 'string' },
