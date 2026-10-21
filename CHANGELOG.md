@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-10-21
+
+### Fixed
+
+- A task with auto-approve on no longer runs under `danger-full-access`. Live,
+  such a task wrote outside its workspace and no approval was raised at all: the
+  sandbox allowed it, so the gate had nothing to refuse and the workspace was
+  not a boundary. The preset is now capped at `workspace-write` (logged in
+  `settings.notes`), which turns leaving the workspace into an escalation the
+  gate can answer with `rejected`.
+
 ## [1.4.2] - 2026-10-20
 
 ### Changed

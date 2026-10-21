@@ -410,20 +410,38 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
    * @param {string} name - preset name.
    * @returns {void}
    */
-  function installPreset(agent: HostAgent, name: string): void {
+  function installPreset(agent: HostAgent, name: string, stayInside: boolean): void {
     const presets = service<HostPermissionPresets>(ctx, 'permissionPresets')
     if (presets === undefined) return
     try {
-      const available = presets.catalog().options.some(option => option.value === name)
+      // A workspace only bounds a task if the sandbox enforces it. The `auto`
+      // preset is danger-full-access: the agent may write anywhere, no approval
+      // is ever raised, and the gate below is never consulted. Narrow it here so
+      // leaving the workspace becomes an escalation the gate can refuse.
+      let effective = name
+      if (stayInside) {
+        const spec = presets.resolve(name)
+        if (spec?.sandbox === 'danger-full-access') {
+          const catalog = presets.catalog().options
+          const fallback = ['workspace-write', 'read-only'].find(candidate =>
+            catalog.some(option => option.value === candidate),
+          )
+          if (fallback !== undefined) {
+            effective = fallback
+            note(`preset ${name} 收窄到 ${fallback}（任务要求不出工作区）`)
+          }
+        }
+      }
+      const available = presets.catalog().options.some(option => option.value === effective)
       if (!available) {
-        note(`preset ${name}: 不在目录里`)
-        ctx.logger?.warn?.(`[task-center] 没有 ${name} 这个权限预设，沿用会话默认值。`)
+        note(`preset ${effective}: 不在目录里`)
+        ctx.logger?.warn?.(`[task-center] 没有 ${effective} 这个权限预设，沿用会话默认值。`)
         return
       }
-      presets.set(agent.session, name)
+      presets.set(agent.session, effective)
       // Recorded because "the preset silently did not stick" looks exactly like
       // "the agent behaved well" from the outside.
-      note(`preset ${name} -> ${String(presets.current?.(agent.session) ?? '?')}`)
+      note(`preset ${effective} -> ${String(presets.current?.(agent.session) ?? '?')}`)
     } catch (error) {
       note(`preset ${name} 失败：${describe(error)}`)
       ctx.logger?.warn?.(`[task-center] 安装权限预设失败：${describe(error)}`)
@@ -604,7 +622,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     }
     const agent = resolved.agent
     const preset = (task.permission ?? '').trim()
-    installPreset(agent, preset === '' ? config.preset : preset)
+    installPreset(agent, preset === '' ? config.preset : preset, task.autoApprove === true)
 
     // Register before the prompt: the agent may flip to running immediately.
     sessionToTask.set(agent.id, task.id)

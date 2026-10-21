@@ -59,10 +59,14 @@ function makeHost(options = {}) {
     },
   }
 
+  const specs =
+    options.specs === undefined
+      ? { auto: { sandbox: 'danger-full-access' }, 'workspace-write': { sandbox: 'workspace-write' }, 'read-only': { sandbox: 'read-only' } }
+      : options.specs
   const presets = {
     catalog: () => ({ options: available.map((value) => ({ value, name: value })) }),
     set: (session, name) => installed.push({ session, name }),
-    resolve: () => ({}),
+    resolve: (name) => specs[name] ?? {},
   }
 
   const ctx = {
@@ -189,8 +193,45 @@ test('a task permission preset overrides the global one', async () => {
   }
 })
 
-test('one task cannot be running twice', async () => {
+test('a task that must stay in its workspace runs with a capped sandbox', async () => {
   const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost({ presets: ['auto', 'workspace-write'] })
+    const runner = createRunner(host.ctx, store)
+    await runner.saveSettings({ preset: 'auto' })
+    const task = await store.create({ title: '别越界', workspaceId: 'ws-1', workspacePath: 'C:/work/app' })
+
+    await runner.start(task.id)
+    // `auto` is danger-full-access: the sandbox would let the agent write
+    // anywhere, so no approval would ever ask and the workspace would not be a
+    // boundary at all.
+    assert.deepEqual(host.installed.map((entry) => entry.name), ['workspace-write'])
+  } finally {
+    await dispose()
+  }
+})
+
+test('a task that asks to be approved every time keeps the wider sandbox', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost({ presets: ['auto', 'workspace-write'] })
+    const runner = createRunner(host.ctx, store)
+    await runner.saveSettings({ preset: 'auto' })
+    const task = await store.create({
+      title: '我要被问',
+      workspaceId: 'ws-1',
+      workspacePath: 'C:/work/app',
+      autoApprove: false,
+    })
+
+    await runner.start(task.id)
+    assert.deepEqual(host.installed.map((entry) => entry.name), ['auto'])
+  } finally {
+    await dispose()
+  }
+})
+
+test('one task cannot be running twice', async () => {  const { store, dispose } = await makeStore()
   try {
     const host = makeHost()
     const runner = createRunner(host.ctx, store)

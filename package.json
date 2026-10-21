@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-center",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "private": true,
   "type": "module",
   "description": "Kanban task center for DeepSeek Harness: a four-column Web panel plus agent tools for managing tasks.",
