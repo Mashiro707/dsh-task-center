@@ -834,6 +834,15 @@ const JSON_OUTPUT = { schema: { type: 'json' }, render: renderJson };
  * @param {TaskStore} store - the shared store.
  * @returns {() => void} disposer releasing every registration.
  */
+/**
+ * Why the agent tools are not registered, when that failed.
+ *
+ * Registration happens once during `apply`; a failure there used to vanish into
+ * a log line. Keeping the message lets `/settings` report it, and lets a later
+ * call retry the registration instead of leaving the panel silently tool-less.
+ */
+let toolSetupError = null;
+let toolSetup = null;
 function publishTools(ctx, store) {
     const disposers = [];
     const add = (definition) => {
@@ -1263,11 +1272,16 @@ export function apply(ctx) {
         approveStage: input => runner.approveStage(requireId(input), optionalOrdinal(input)),
         rejectStage: input => runner.rejectStage(requireId(input), optionalOrdinal(input), typeof input.feedback === 'string' ? input.feedback : undefined),
         stageDoc: input => runner.stageDoc(requireId(input), optionalOrdinal(input)),
-        settings: async () => ({
-            ...(await runner.settings()),
-            ...runner.stats(),
-            available: service(ctx, 'sessionController') !== undefined,
-        }),
+        settings: async () => {
+            if (toolSetupError !== null && toolSetup !== null)
+                toolSetup();
+            return {
+                ...(await runner.settings()),
+                ...runner.stats(),
+                available: service(ctx, 'sessionController') !== undefined,
+                toolsError: toolSetupError,
+            };
+        },
         saveSettings: input => runner.saveSettings(input),
         queue: () => runner.queue(),
         workspaces: () => listWorkspaces(),
@@ -1315,15 +1329,19 @@ export function apply(ctx) {
         }
     }
     ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: ROUTE, handler }), 'task-center: json api');
-    ctx.effect(() => {
+    toolSetup = () => {
         try {
-            return publishTools(ctx, watched);
+            const dispose = publishTools(ctx, watched);
+            toolSetupError = null;
+            ctx.effect(() => dispose, 'task-center: agent tools');
+            ctx.logger?.info?.('[task-center] agent tools registered');
         }
         catch (error) {
-            ctx.logger?.warn?.(`[task-center] 工具注册失败：${error instanceof Error ? error.message : String(error)}`);
-            return () => undefined;
+            toolSetupError = error instanceof Error ? error.message : String(error);
+            ctx.logger?.warn?.(`[task-center] 工具注册失败：${toolSetupError}`);
         }
-    }, 'task-center: agent tools');
+    };
+    toolSetup();
     ctx.effect(() => () => runner.dispose(), 'task-center: runner');
     // No run can outlive the plugin, so any row still marked running is an orphan.
     void runner.reconcile().catch((error) => {
