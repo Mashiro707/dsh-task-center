@@ -76,6 +76,8 @@ test('every requested visual affordance is present', () => {
     ['dropdown options themed', /select\.tc-input option\{[^}]*bg-layer-2/],
     ['number spinners hidden', /::-webkit-inner-spin-button\{-webkit-appearance:none/],
     ['date picker themed', /input\.tc-input\[type=date\]\{color-scheme/],
+    ['one control height', /\.tc-input\{[^}]*height:30px/],
+    ['buttons match the controls', /\.tc-btn\{[^}]*height:30px/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
 })

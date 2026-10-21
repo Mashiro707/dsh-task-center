@@ -1383,14 +1383,14 @@ window.__ModuleLoader__.load({
 .tc-addinput{flex:1 1 auto}
 
 /* ---------------------------------------------------------------- inputs */
-.tc-input{appearance:none;-webkit-appearance:none;font:inherit;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;min-width:0;outline:none;transition:border-color .12s ease,background-color .12s ease,outline-color .12s ease}
+.tc-input{appearance:none;-webkit-appearance:none;font:inherit;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;height:30px;padding:0 9px;min-width:0;outline:none;transition:border-color .12s ease,background-color .12s ease,outline-color .12s ease}
 .tc-input::placeholder{color:var(--dsw-alias-label-secondary);opacity:.75}
 .tc-input:hover{border-color:var(--dsw-alias-border-l2)}
 .tc-input:focus{border-color:var(--dsw-alias-brand-primary);outline:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,transparent);outline-offset:0}
 .tc-input:disabled{opacity:.55;cursor:not-allowed}
 
 /* one look for every select: no OS chrome, chevron drawn from theme tokens */
-select.tc-input{color-scheme:light dark;cursor:pointer;padding-right:26px;background-image:linear-gradient(45deg,transparent 50%,var(--dsw-alias-label-secondary) 50%),linear-gradient(135deg,var(--dsw-alias-label-secondary) 50%,transparent 50%);background-position:right 14px center,right 10px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+select.tc-input{color-scheme:light dark;cursor:pointer;height:30px;padding:0 26px 0 9px;background-image:linear-gradient(45deg,transparent 50%,var(--dsw-alias-label-secondary) 50%),linear-gradient(135deg,var(--dsw-alias-label-secondary) 50%,transparent 50%);background-position:right 14px center,right 10px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
 select.tc-input:hover{background-image:linear-gradient(45deg,transparent 50%,var(--dsw-alias-label-primary) 50%),linear-gradient(135deg,var(--dsw-alias-label-primary) 50%,transparent 50%)}
 select.tc-input option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
 
@@ -1401,16 +1401,16 @@ input.tc-input[type=number]::-webkit-outer-spin-button,input.tc-input[type=numbe
 /* dates: keep the native picker legible in both themes */
 input.tc-input[type=date]{color-scheme:light dark}
 
-textarea.tc-input{resize:vertical;min-height:72px;line-height:1.55}
+textarea.tc-input{height:auto;resize:vertical;min-height:72px;padding:5px 9px;line-height:1.55}
 
-.tc-select-sm{flex:0 0 auto;font-size:12px;padding:5px 24px 5px 8px;cursor:pointer}
+.tc-select-sm{flex:0 0 auto;font-size:12px;height:30px;padding:0 24px 0 8px;cursor:pointer}
 
 .tc-searchwrap{position:relative;display:flex;align-items:center;flex:0 1 230px;min-width:150px}
 .tc-search-icon{position:absolute;left:9px;width:13px;height:13px;color:var(--dsw-alias-label-secondary);pointer-events:none}
 .tc-search{width:100%;padding-left:27px;font-size:12px}
 
 /* --------------------------------------------------------------- buttons */
-.tc-btn{appearance:none;font:inherit;font-size:12px;line-height:1.4;padding:5px 11px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;white-space:nowrap;transition:background .12s ease,border-color .12s ease}
+.tc-btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;font:inherit;font-size:12px;line-height:1.4;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;white-space:nowrap;transition:background .12s ease,border-color .12s ease}
 .tc-btn:hover{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}
 .tc-btn-primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base);font-weight:500}
 .tc-btn-primary:hover{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);opacity:.88}
@@ -1426,7 +1426,7 @@ textarea.tc-input{resize:vertical;min-height:72px;line-height:1.55}
 .tc-toggle-on .tc-toggle-dot{background:var(--dsw-alias-state-success-primary)}
 .tc-mini{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-secondary);white-space:nowrap}
 .tc-mini-label{color:var(--dsw-alias-label-tertiary)}
-.tc-num{width:56px;padding:4px 6px;font-variant-numeric:tabular-nums;text-align:center}
+.tc-num{width:56px;height:30px;padding:0 6px;font-variant-numeric:tabular-nums;text-align:center}
 .tc-queuebadge{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:1.4;padding:3px 9px;border-radius:999px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font-variant-numeric:tabular-nums}
 .tc-runpill-queued{color:var(--dsw-alias-label-secondary);border-color:var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base)}
 .tc-runpill-queued:hover{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 36%,transparent)}
