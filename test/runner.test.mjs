@@ -751,7 +751,9 @@ test('a failed attempt is retried as far as the settings allow', async () => {
   try {
     const host = makeHost()
     const runner = createRunner(host.ctx, store)
-    await runner.saveSettings({ timeoutMinutes: 0.02, retries: 1 })
+    // No wall-clock limit here: this test drives the failure through an event,
+    // so a timer firing under load must not race it.
+    await runner.saveSettings({ timeoutMinutes: 0, retries: 1 })
     const task = await store.create({ title: '重试', cwd: 'C:/work/retry' })
 
     await runner.start(task.id)
@@ -1035,6 +1037,37 @@ test('an approved stage runs its document and verification closes it', async () 
     })
     assert.equal(row.status, 'done', 'the last stage finishing finishes the task')
     assert.ok(row.stages[0].output.includes('node --version'), 'the verification output is kept')
+  } finally {
+    await dispose()
+  }
+})
+
+test('approving a document before the planning run closes still starts the execute run', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '边批边收尾', workspacePath: workspace })
+
+    const first = await runner.start(task.id)
+    assert.equal(first.run.kind, 'plan', 'the first run only plans')
+
+    // The agent submitted its document, but the planning row still says running.
+    await planOneStage(store, task, workspace, { status: 'awaiting-approval' })
+    const approved = await runner.approveStage(task.id, 1)
+    assert.equal(approved.stages[0].status, 'approved', 'the click lands even mid-close')
+
+    host.emit('agent/status', { agent: { id: first.run.sessionId }, status: 'idle' })
+    const row = await waitFor(async () => {
+      const board = await store.list()
+      const found = board.tasks.find((entry) => entry.id === task.id)
+      return found !== undefined && found.run !== null && found.run.kind === 'execute' ? found : null
+    })
+    assert.equal(row.run.kind, 'execute', 'the approved stage starts once the plan row is closed')
+    assert.equal(host.created.length, 2)
+    assert.equal(host.created[1].cwd, workspace)
   } finally {
     await dispose()
   }

@@ -531,6 +531,8 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   const earlyIdle = new Set<string>()
   /** Outcomes that arrived before the run row they belong to was written. */
   const pendingSettle = new Map<string, { status: TaskRunStatus; message: string | null; retry: boolean }>()
+  /** Sessions whose run already closed, so a duplicate idle cannot close it twice. */
+  const settledSessions: string[] = []
   let settings: RunnerSettings | null = null
   const approvals = { approved: 0, blocked: 0, delegated: 0, seen: 0 }
   // Counted so a stuck "running" row can be explained from the outside: either
@@ -726,6 +728,14 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
           message: message ?? '规划结束，但没有提交阶段文档。',
           endedAt: Date.now(),
         })
+        return
+      }
+      // The user can approve while the planning run is still closing. Once its
+      // row is written as finished, start the execute run for them.
+      if (stage.status === 'approved') {
+        setTimeout(() => {
+          void start(task.id).catch(error => note(`approved stage did not start: ${describe(error)}`))
+        }, 0)
       }
       return
     }
@@ -824,6 +834,13 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       note(`settle ${taskId}: 会话已不在本 runner 名下`)
       return
     }
+    if (options.force !== true && settledSessions.indexOf(sessionId) !== -1) {
+      // Both the plain and the global status listener can deliver the same idle.
+      note(`settle ${taskId}: 这个会话已经收过尾了`)
+      return
+    }
+    settledSessions.push(sessionId)
+    if (settledSessions.length > 128) settledSessions.shift()
     sessionToTask.delete(sessionId)
     taskToSession.delete(taskId)
     stopping.delete(taskId)
@@ -845,8 +862,9 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       const run = task?.run ?? null
       if (task === undefined || run === null || run.sessionId !== sessionId) {
         // The row may simply not be written yet: `admit` records the session
-        // before it writes the run, so an idle in that window must not be lost.
-        if (run === null && pendingSettle.size < 64) {
+        // before it writes the run, so an outcome in that window must not be
+        // lost. A forced re-apply that still does not match is genuinely stale.
+        if (options.force !== true && pendingSettle.size < 64) {
           pendingSettle.set(sessionId, { status, message, retry: options.retry === true })
           note(`settle ${taskId}: 任务行还没写，先记下结果`)
           return
@@ -946,13 +964,17 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     const config = await readSettings()
     const workspaceId = (task.workspaceId ?? '').trim()
     const cwd = (task.cwd ?? '').trim()
-    const attempt = (task.run?.attempts ?? 0) + 1
     const root = workspaceRoot(task)
     if (root === '') throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。')
     const mode = await resolveMode(task)
+    // Retries count inside one kind of run: a fresh execute after a plan is not
+    // the plan's second attempt.
+    const carried = task.run !== null && (task.run.kind ?? 'execute') === mode.kind ? task.run.attempts : 0
+    const attempt = carried + 1
 
     // Exactly one of the two: the Host rejects a request naming both.
-    const created = await controller.create(workspaceId === '' ? { cwd } : { workspaceId })
+    // A task that only carries a workspace path still needs that directory.
+    const created = await controller.create(workspaceId === '' ? { cwd: root } : { workspaceId })
 
     // A cancel that landed while the session was being created wins: stop the
     // session we just made instead of handing it a prompt it should not run.
@@ -1239,6 +1261,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       // records which task owns the session. Adopt the row instead of dropping
       // the only chance to close it.
       if (payload?.status === 'running') return
+      if (settledSessions.indexOf(sessionId) !== -1) return
       void adopt(sessionId).then((adopted) => {
         if (adopted !== undefined) {
           void settle(adopted, sessionId, 'done', null)
@@ -1435,8 +1458,13 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       const stages = task.stages.map((entry, index) =>
         index === position ? { ...entry, status: 'approved' as TaskStageStatus, message: null } : entry,
       )
-      await store.update({ id: taskId, stages, stageIndex: position })
+      const approved = await store.update({ id: taskId, stages, stageIndex: position })
       note(`stage ${stage.index} approved`)
+      // The planning run may still be closing; approving is a state change, so
+      // let the click land and start the execute run when the slot is free.
+      if (approved.run !== null && (approved.run.status === 'running' || approved.run.status === 'queued')) {
+        return approved
+      }
       return start(taskId)
     },
 
