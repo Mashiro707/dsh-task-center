@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-10-21
+
+### Fixed
+
+- Every form control now shares one style. Dropdowns lost their native OS
+  chrome but had no replacement affordance, so they read as flat boxes: they
+  now carry a theme-drawn chevron, themed option rows, and a pointer cursor.
+  Number fields drop the browser spinners, date fields follow the colour
+  scheme, and textareas share the same border, radius and focus ring.
+
 ## [1.4.3] - 2026-10-21
 
 ### Fixed

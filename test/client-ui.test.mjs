@@ -71,6 +71,11 @@ test('every requested visual affordance is present', () => {
     ['workspace chip', /\.tc-ws\{[^}]*border-radius/],
     ['inline directory row', /\.tc-inline\{[^}]*display:flex/],
     ['auto-approve switch', /\.tc-switch-track\{[^}]*border-radius:999px/],
+    ['dropdown chrome removed', /select\.tc-input\{[^}]*color-scheme:light dark/],
+    ['dropdown chevron', /select\.tc-input\{[^}]*background-image:linear-gradient\(45deg/],
+    ['dropdown options themed', /select\.tc-input option\{[^}]*bg-layer-2/],
+    ['number spinners hidden', /::-webkit-inner-spin-button\{-webkit-appearance:none/],
+    ['date picker themed', /input\.tc-input\[type=date\]\{color-scheme/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
 })
@@ -82,6 +87,21 @@ test('the markup feeds the stylesheet its state', () => {
   assert.match(source, /className: 'tc-searchwrap'/, 'search field needs its icon wrapper')
   assert.match(source, /className: 'tc-group'/, 'drawer fields need grouping')
   assert.match(source, /className: 'tc-scrim'/, 'drawer needs a dismissible scrim')
+})
+
+test('every dropdown shares one control style', () => {
+  const dropdowns = source
+    .split("'select',")
+    .slice(1)
+    .map((chunk) => chunk.slice(0, 200))
+  assert.ok(dropdowns.length >= 6, `expected the panel's dropdowns, found ${dropdowns.length}`)
+  for (const dropdown of dropdowns) {
+    assert.match(
+      dropdown,
+      /className:\s*'tc-input/,
+      `a dropdown drops the shared control class: ${dropdown.split('\n')[1] ?? dropdown}`,
+    )
+  }
 })
 
 test('the panel can start and stop agent runs', () => {
