@@ -754,6 +754,15 @@ test('a failed attempt is retried as far as the settings allow', async () => {
     const task = await store.create({ title: '重试', cwd: 'C:/work/retry' })
 
     await runner.start(task.id)
+    await waitFor(() => (host.created.length === 1 ? true : null), 8000)
+
+    // Fail the first attempt outright, so the retry does not ride on a timer.
+    host.emit('agent/error', {
+      agent: host.agents.get('session-1'),
+      turn: 1,
+      step: 1,
+      error: new Error('boom'),
+    })
     await waitFor(() => (host.created.length === 2 ? true : null), 8000)
 
     host.emit('agent/status', { agent: host.agents.get('session-2'), status: 'idle' })
