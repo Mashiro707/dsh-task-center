@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-10-26
+
+### Fixed
+
+- The seven `task_*` agent tools are registered again. `tools.register`
+  validates `output.schema` against an enforced JSON-schema subset: `type: "json"`
+  is an authoring shorthand, and union types such as `type: ["string", "null"]`
+  are rejected outright. The first rejection aborted the registration loop, so
+  no agent has seen `task_list` … `task_stage_report` since 1.0 — which is why
+  a planning run could never write its stage document.
+- Optional string parameters are now `type: "string"` with "empty string clears"
+  in their description; the handlers still accept `null`.
+
+### Added
+
+- The fake host in the tests validates tool definitions the same way the real
+  host does, and a test asserts that all seven tools register.
+
 ## [1.5.1] - 2026-10-21
 
 ### Fixed
