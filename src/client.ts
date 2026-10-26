@@ -13,6 +13,41 @@ window.__ModuleLoader__.load({
     const PRIORITIES = ['low', 'normal', 'high', 'urgent']
     const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 }
 
+    // An open list is portalled when react-dom is reachable, so neither the
+    // scrolling board nor the drawer can clip it; otherwise it expands in place.
+    let createPortal: ((node: unknown, container: Element) => any) | null = null
+    try {
+      const reactDom = require('react-dom')
+      if (reactDom !== null && typeof reactDom.createPortal === 'function') {
+        createPortal = reactDom.createPortal
+      }
+    } catch (error) {
+      createPortal = null
+    }
+
+    interface DropdownOption {
+      value: string
+      label: string
+    }
+
+    interface DropdownPlacement {
+      left: number
+      width: number
+      top: number | null
+      bottom: number | null
+      maxHeight: number
+    }
+
+    interface DropdownProps {
+      value: string
+      options: DropdownOption[]
+      onChange: (value: string) => void
+      className?: string
+      ariaLabel?: string
+      title?: string
+      disabled?: boolean
+    }
+
     // ---------------------------------------------------------------- locale
 
     const DICT = {
@@ -581,6 +616,216 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function ChevronIcon() {
+      return h(
+        'svg',
+        {
+          viewBox: '0 0 24 24',
+          width: 12,
+          height: 12,
+          'aria-hidden': true,
+          className: 'tc-chevron',
+        },
+        h('path', {
+          d: 'M6 9.5l6 6 6-6',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.8,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+      )
+    }
+
+    /**
+     * A themed picker.
+     *
+     * A native `select` hands its popup to the operating system on Windows, so
+     * that list can never match the panel. This draws both halves itself: the
+     * closed control stays in flow, and the open list is portalled to the body
+     * with fixed coordinates so a scrolling board or drawer cannot clip it.
+     */
+    function Dropdown(props: DropdownProps) {
+      const [open, setOpen] = useState(false)
+      const [active, setActive] = useState(0)
+      const [placed, setPlaced] = useState(null)
+      const rootRef = useRef(null)
+      const listRef = useRef(null)
+      const options = props.options
+      const selected = options.findIndex((option) => option.value === props.value)
+      const label = selected < 0 ? (options.length === 0 ? '' : options[0].label) : options[selected].label
+      const portal = createPortal
+      const floating = portal !== null
+
+      useEffect(() => {
+        if (!open) {
+          return undefined
+        }
+        const measure = () => {
+          const root = rootRef.current
+          if (root === null) {
+            return
+          }
+          const box = root.getBoundingClientRect()
+          const below = window.innerHeight - box.bottom
+          const above = box.top
+          const up = below < 180 && above > below
+          setPlaced({
+            left: Math.max(8, Math.min(box.left, window.innerWidth - Math.max(box.width, 160) - 8)),
+            width: Math.max(box.width, 160),
+            top: up ? null : box.bottom + 4,
+            bottom: up ? window.innerHeight - box.top + 4 : null,
+            maxHeight: Math.max(120, (up ? above : below) - 12),
+          })
+        }
+        measure()
+        window.addEventListener('resize', measure)
+        window.addEventListener('scroll', measure, true)
+        return () => {
+          window.removeEventListener('resize', measure)
+          window.removeEventListener('scroll', measure, true)
+        }
+      }, [open])
+
+      useEffect(() => {
+        if (!open) {
+          return undefined
+        }
+        const onPointer = (event: MouseEvent) => {
+          const root = rootRef.current
+          const list = listRef.current
+          if (event.target instanceof Node) {
+            if (root !== null && root.contains(event.target)) {
+              return
+            }
+            if (list !== null && list.contains(event.target)) {
+              return
+            }
+          }
+          setOpen(false)
+        }
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key === 'Escape') {
+            setOpen(false)
+          }
+        }
+        document.addEventListener('mousedown', onPointer, true)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('mousedown', onPointer, true)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [open])
+
+      useEffect(() => {
+        if (open) {
+          setActive(selected < 0 ? 0 : selected)
+        }
+      }, [open, selected])
+
+      const choose = (value: string) => {
+        setOpen(false)
+        if (value !== props.value) {
+          props.onChange(value)
+        }
+      }
+
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          if (!open) {
+            setOpen(true)
+            return
+          }
+          const step = event.key === 'ArrowDown' ? 1 : -1
+          setActive((index) => (index + step + options.length) % options.length)
+          return
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          if (!open) {
+            setOpen(true)
+            return
+          }
+          const option = options[active]
+          if (option !== undefined) {
+            choose(option.value)
+          }
+          return
+        }
+        if (event.key === 'Escape' && open) {
+          event.preventDefault()
+          setOpen(false)
+        }
+      }
+
+      let popup = null
+      if (open) {
+        const style =
+          floating && placed !== null
+            ? {
+                position: 'fixed',
+                left: placed.left + 'px',
+                width: placed.width + 'px',
+                maxHeight: placed.maxHeight + 'px',
+                top: placed.top === null ? undefined : placed.top + 'px',
+                bottom: placed.bottom === null ? undefined : placed.bottom + 'px',
+              }
+            : undefined
+        const list = h(
+          'div',
+          {
+            ref: listRef,
+            className: 'tc-dd-list' + (floating ? '' : ' tc-dd-list-inline'),
+            role: 'listbox',
+            'aria-label': props.ariaLabel,
+            style,
+          },
+          options.map((option, index) =>
+            h(
+              'div',
+              {
+                key: option.value,
+                role: 'option',
+                'aria-selected': option.value === props.value,
+                className:
+                  'tc-dd-item' +
+                  (option.value === props.value ? ' tc-dd-item-on' : '') +
+                  (index === active ? ' tc-dd-item-active' : ''),
+                onMouseEnter: () => setActive(index),
+                onClick: () => choose(option.value),
+              },
+              option.label,
+            ),
+          ),
+        )
+        popup = portal !== null && placed !== null ? portal(list, document.body) : list
+      }
+
+      const className = 'tc-dd' + (props.className === undefined ? '' : ' ' + props.className) + (open ? ' tc-dd-open' : '')
+      return h(
+        'div',
+        { className, ref: rootRef },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'tc-dd-btn',
+            disabled: props.disabled === true,
+            onClick: () => setOpen(!open),
+            onKeyDown,
+            'aria-haspopup': 'listbox',
+            'aria-expanded': open,
+            'aria-label': props.ariaLabel ?? props.title,
+            title: props.title ?? props.ariaLabel,
+          },
+          h('span', { className: 'tc-dd-value' }, label),
+          h(ChevronIcon),
+        ),
+        popup,
+      )
+    }
+
     function FolderIcon() {
       return h(
         'svg',
@@ -1100,15 +1345,12 @@ window.__ModuleLoader__.load({
                 'label',
                 { className: 'tc-field tc-field-half' },
                 h('span', { className: 'tc-label' }, t('field.priority')),
-                h(
-                  'select',
-                  {
-                    className: 'tc-input',
-                    value: form.priority,
-                    onChange: (event) => stage({ priority: event.target.value }),
-                  },
-                  PRIORITIES.map((id) => h('option', { key: id, value: id }, t('priority.' + id))),
-                ),
+                h(Dropdown, {
+                  className: 'tc-dd-block',
+                  value: form.priority,
+                  options: PRIORITIES.map((id) => ({ value: id, label: t('priority.' + id) })),
+                  onChange: (value) => stage({ priority: value }),
+                }),
               ),
               h(
                 'label',
@@ -1126,20 +1368,17 @@ window.__ModuleLoader__.load({
               'label',
               { className: 'tc-field' },
               h('span', { className: 'tc-label' }, t('field.workspace')),
-              h(
-                'select',
-                {
-                  className: 'tc-input',
-                  value: form.workspaceId,
-                  onChange: (event) => {
-                    const nextId = event.target.value
-                    const found = workspaces.find((entry) => entry.id === nextId)
-                    stage({ workspaceId: nextId, workspacePath: nextId === '' || found === undefined ? '' : found.path })
-                  },
+              h(Dropdown, {
+                className: 'tc-dd-block',
+                value: form.workspaceId,
+                options: [{ value: '', label: t('noWorkspace') }].concat(
+                  workspaces.map((entry) => ({ value: entry.id, label: entry.title + ' — ' + entry.path })),
+                ),
+                onChange: (nextId) => {
+                  const found = workspaces.find((entry) => entry.id === nextId)
+                  stage({ workspaceId: nextId, workspacePath: nextId === '' || found === undefined ? '' : found.path })
                 },
-                h('option', { value: '' }, t('noWorkspace')),
-                workspaces.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.title + ' — ' + entry.path)),
-              ),
+              }),
               h('span', { className: 'tc-fieldhint' }, t('workspaceHint')),
             ),
             h(
@@ -1192,18 +1431,16 @@ window.__ModuleLoader__.load({
               'label',
               { className: 'tc-field' },
               h('span', { className: 'tc-label' }, t('field.permission')),
-              h(
-                'select',
-                {
-                  className: 'tc-input',
-                  value: form.permission,
-                  onChange: (event) => stage({ permission: event.target.value }),
-                },
-                h('option', { value: '' }, inheritLabel),
-                permissions
-                  .filter((option) => option.value !== globalPreset)
-                  .map((option) => h('option', { key: option.value, value: option.value }, option.name)),
-              ),
+              h(Dropdown, {
+                className: 'tc-dd-block',
+                value: form.permission,
+                options: [{ value: '', label: inheritLabel }].concat(
+                  permissions
+                    .filter((option) => option.value !== globalPreset)
+                    .map((option) => ({ value: option.value, label: option.name })),
+                ),
+                onChange: (value) => stage({ permission: value }),
+              }),
               h('span', { className: 'tc-fieldhint' }, t('permissionHint')),
             ),
             h(
@@ -1478,16 +1715,13 @@ window.__ModuleLoader__.load({
                       { className: 'tc-tags' },
                       task.tags.map((name) => h('span', { key: name, className: 'tc-tag' }, name)),
                     ),
-                h(
-                  'select',
-                  {
-                    className: 'tc-input tc-select-sm',
-                    value: task.status,
-                    'aria-label': t('field.status'),
-                    onChange: (event) => props.onMove(task.id, event.target.value),
-                  },
-                  COLUMNS.map((id) => h('option', { key: id, value: id }, t('column.' + id))),
-                ),
+                h(Dropdown, {
+                  className: 'tc-dd-sm',
+                  value: task.status,
+                  options: COLUMNS.map((id) => ({ value: id, label: t('column.' + id) })),
+                  onChange: (value) => props.onMove(task.id, value),
+                  ariaLabel: t('field.status'),
+                }),
               )
             }),
       )
@@ -1977,30 +2211,25 @@ window.__ModuleLoader__.load({
                   }
                 },
               }),
-              h(
-                'select',
-                {
-                  className: 'tc-input tc-select-sm',
-                  value: draftStatus,
-                  'aria-label': t('field.status'),
-                  onChange: (event) => setDraftStatus(event.target.value),
-                },
-                COLUMNS.map((id) => h('option', { key: id, value: id }, t('column.' + id))),
-              ),
+              h(Dropdown, {
+                className: 'tc-dd-sm',
+                value: draftStatus,
+                options: COLUMNS.map((id) => ({ value: id, label: t('column.' + id) })),
+                onChange: (value) => setDraftStatus(value),
+                ariaLabel: t('field.status'),
+              }),
               workspaces.length === 0
                 ? null
-                : h(
-                    'select',
-                    {
-                      className: 'tc-input tc-select-sm tc-ws-select',
-                      value: targetWs,
-                      'aria-label': t('targetWs'),
-                      title: t('targetWs'),
-                      onChange: (event) => setTargetWs(event.target.value),
-                    },
-                    h('option', { value: '' }, t('pickWorkspace')),
-                    workspaces.map((entry) => h('option', { key: entry.id, value: entry.id }, entry.title)),
-                  ),
+                : h(Dropdown, {
+                    className: 'tc-dd-sm tc-dd-ws',
+                    value: targetWs,
+                    options: [{ value: '', label: t('pickWorkspace') }].concat(
+                      workspaces.map((entry) => ({ value: entry.id, label: entry.title })),
+                    ),
+                    onChange: (value) => setTargetWs(value),
+                    ariaLabel: t('targetWs'),
+                    title: t('targetWs'),
+                  }),
               h('button', { type: 'button', className: 'tc-btn tc-btn-primary', onClick: () => void submitDraft() }, t('create')),
             ),
             h(
@@ -2017,17 +2246,13 @@ window.__ModuleLoader__.load({
             ),
             tags.length === 0
               ? null
-              : h(
-                  'select',
-                  {
-                    className: 'tc-input tc-select-sm',
-                    value: tag,
-                    'aria-label': t('allTags'),
-                    onChange: (event) => setTag(event.target.value),
-                  },
-                  h('option', { value: '' }, t('allTags')),
-                  tags.map((name) => h('option', { key: name, value: name }, name)),
-                ),
+              : h(Dropdown, {
+                  className: 'tc-dd-sm',
+                  value: tag,
+                  options: [{ value: '', label: t('allTags') }].concat(tags.map((name) => ({ value: name, label: name }))),
+                  onChange: (value) => setTag(value),
+                  ariaLabel: t('allTags'),
+                }),
             h(
               'button',
               {
@@ -2168,10 +2393,24 @@ window.__ModuleLoader__.load({
 .tc-input:focus{border-color:var(--dsw-alias-brand-primary);outline:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,transparent);outline-offset:0}
 .tc-input:disabled{opacity:.55;cursor:not-allowed}
 
-/* one look for every select: no OS chrome, chevron drawn from theme tokens */
-select.tc-input{color-scheme:light dark;cursor:pointer;height:30px;padding:0 26px 0 9px;background-image:linear-gradient(45deg,transparent 50%,var(--dsw-alias-label-secondary) 50%),linear-gradient(135deg,var(--dsw-alias-label-secondary) 50%,transparent 50%);background-position:right 14px center,right 10px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
-select.tc-input:hover{background-image:linear-gradient(45deg,transparent 50%,var(--dsw-alias-label-primary) 50%),linear-gradient(135deg,var(--dsw-alias-label-primary) 50%,transparent 50%)}
-select.tc-input option{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+/* dropdowns: the list belongs to the panel, so it can match it */
+.tc-dd{position:relative;display:inline-block;flex:0 0 auto;min-width:0;max-width:100%}
+.tc-dd-block{display:block;width:100%}
+.tc-dd-btn{appearance:none;display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:30px;min-width:0;padding:0 9px;font:inherit;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;cursor:pointer;text-align:left;transition:border-color .12s ease,background-color .12s ease}
+.tc-dd-btn:hover:not(:disabled){border-color:var(--dsw-alias-border-l2)}
+.tc-dd-open>.tc-dd-btn{border-color:var(--dsw-alias-brand-primary)}
+.tc-dd-btn:disabled{opacity:.55;cursor:not-allowed}
+.tc-dd-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:0}
+.tc-dd-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tc-chevron{flex:none;color:var(--dsw-alias-label-secondary)}
+.tc-dd-open .tc-chevron{color:var(--dsw-alias-label-primary)}
+.tc-dd-list{z-index:60;overflow-y:auto;padding:4px;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:9px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent}
+.tc-dd-list-inline{position:relative;top:4px;left:auto;width:100%;max-width:none}
+.tc-dd-item{padding:6px 9px;border-radius:7px;font-size:13px;line-height:1.45;color:var(--dsw-alias-label-primary);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tc-dd-item-active{background:var(--dsw-alias-bg-layer-1)}
+.tc-dd-item-on{color:var(--dsw-alias-brand-primary);font-weight:600}
+.tc-dd-sm .tc-dd-btn{height:30px;padding:0 8px;font-size:12px}
+.tc-dd-ws{max-width:168px}
 
 /* numbers: no spinners, steady digits */
 input.tc-input[type=number]{appearance:textfield;-moz-appearance:textfield}
@@ -2182,10 +2421,8 @@ input.tc-input[type=date]{color-scheme:light dark}
 
 textarea.tc-input{height:auto;resize:vertical;min-height:72px;padding:5px 9px;line-height:1.55}
 
-.tc-select-sm{flex:0 0 auto;font-size:12px;height:30px;padding:0 24px 0 8px;cursor:pointer}
-
 /* native popups and pickers follow the app theme, not just the OS one */
-body[data-ds-dark-theme] select.tc-input,body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
+body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-body,.tc-drawer-body,.tc-blockers{scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l2) transparent}
 
 .tc-searchwrap{position:relative;display:flex;align-items:center;flex:0 1 230px;min-width:150px}

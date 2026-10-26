@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-10-26
+
+### Changed
+
+- Every dropdown in the panel is drawn by the panel itself. A native `select`
+  hands its popup to Windows, so the open list could never match the panel; the
+  seven dropdowns (draft status, board-card status, tag filter, workspace
+  picker, and the drawer's priority / workspace / permission fields) now share
+  one control, one highlight and one keyboard model (Up/Down, Enter, Escape).
+  The open list is portalled to the body with fixed coordinates, so neither the
+  scrolling board nor the drawer can clip it.
+
+### Fixed
+
+- Choosing a status in the board list view now actually moves the task; the
+  dropdown replaced the native select there too.
+
 ## [1.5.2] - 2026-10-26
 
 ### Fixed

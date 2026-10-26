@@ -72,14 +72,15 @@ test('every requested visual affordance is present', () => {
     ['workspace chip', /\.tc-ws\{[^}]*border-radius/],
     ['inline directory row', /\.tc-inline\{[^}]*display:flex/],
     ['auto-approve switch', /\.tc-switch-track\{[^}]*border-radius:999px/],
-    ['dropdown chrome removed', /select\.tc-input\{[^}]*color-scheme:light dark/],
-    ['dropdown chevron', /select\.tc-input\{[^}]*background-image:linear-gradient\(45deg/],
-    ['dropdown options themed', /select\.tc-input option\{[^}]*bg-layer-2/],
+    ['dropdown control', /\.tc-dd-btn\{[^}]*height:30px/],
+    ['dropdown chevron', /\.tc-chevron\{/],
+    ['dropdown list is ours', /\.tc-dd-list\{[^}]*background:var\(--dsw-alias-bg-layer-2\)/],
+    ['dropdown highlight', /\.tc-dd-item-active\{[^}]*bg-layer-1/],
     ['number spinners hidden', /::-webkit-inner-spin-button\{-webkit-appearance:none/],
     ['date picker themed', /input\.tc-input\[type=date\]\{color-scheme/],
     ['one control height', /\.tc-input\{[^}]*height:30px/],
     ['buttons match the controls', /\.tc-btn\{[^}]*height:30px/],
-    ['popup follows the app theme', /body\[data-ds-dark-theme\] select\.tc-input[^{]*\{color-scheme:dark\}/],
+    ['selected option stands out', /\.tc-dd-item-on\{[^}]*brand-primary/],
     ['themed scrollbars', /scrollbar-color:var\(--dsw-alias-border-l2\)/],
   ]
   for (const [label, pattern] of required) assert.match(css, pattern, `missing ${label}`)
@@ -94,18 +95,15 @@ test('the markup feeds the stylesheet its state', () => {
   assert.match(source, /className: 'tc-scrim'/, 'drawer needs a dismissible scrim')
 })
 
-test('every dropdown shares one control style', () => {
-  const dropdowns = source
-    .split("'select',")
-    .slice(1)
-    .map((chunk) => chunk.slice(0, 200))
-  assert.ok(dropdowns.length >= 6, `expected the panel's dropdowns, found ${dropdowns.length}`)
+test('every dropdown is drawn by the panel, not the operating system', () => {
+  // A native select hands its popup to the OS, so no stylesheet can reach it.
+  assert.equal(source.includes("'select',"), false, 'a native select sneaked back in')
+  const dropdowns = source.split('h(Dropdown, {').slice(1)
+  assert.ok(dropdowns.length >= 7, 'expected the panel dropdowns, found ' + dropdowns.length)
   for (const dropdown of dropdowns) {
-    assert.match(
-      dropdown,
-      /className:\s*'tc-input/,
-      `a dropdown drops the shared control class: ${dropdown.split('\n')[1] ?? dropdown}`,
-    )
+    const head = dropdown.slice(0, 700)
+    assert.match(head, /value:/, 'a dropdown lost its value')
+    assert.match(head, /onChange:/, 'every dropdown must report a change')
   }
 })
 
