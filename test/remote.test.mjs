@@ -146,7 +146,10 @@ test('the client arguments carry the key, the port and the directory', () => {
   assert.ok(args.includes('-p'))
   assert.ok(args.includes('2222'))
   assert.ok(args.includes('root@10.0.0.9'))
-  assert.ok(args.includes("cd '/root/go/work' && go build ./..."), 'the command runs in the remote workspace')
+  assert.ok(
+    args.includes("cd '/root/go/work' && bash -lc 'go build ./...'"),
+    'the command runs in the remote workspace, in a login shell',
+  )
   assert.ok(args.includes('BatchMode=yes'), 'a missing key fails instead of prompting')
 })
 

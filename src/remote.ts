@@ -179,6 +179,12 @@ export function sshPath(): string {
 
 /**
  * Build the client arguments for one remote command.
+ *
+ * The command runs under a login shell: an ssh session starts a non-interactive
+ * shell that never reads `/etc/profile`, so a toolchain installed outside the
+ * default `PATH` (Go in `/usr/local/go/bin`, for instance) is missing from it
+ * while the logged-in user has it. `bash -lc` puts the command in the same
+ * environment a person gets after logging in.
  * @param {RemoteTarget} target - where to connect.
  * @param {string} command - shell command to run in the remote workspace.
  * @returns {string[]} argv for `ssh`, without the program itself.
@@ -189,7 +195,7 @@ export function buildSshArgs(target: RemoteTarget, command: string): string[] {
     args.push('-i', target.keyPath)
   }
   args.push('-p', String(target.port), `${target.user}@${target.host}`)
-  args.push(`cd ${shellQuote(target.remotePath)} && ${command}`)
+  args.push(`cd ${shellQuote(target.remotePath)} && bash -lc ${shellQuote(command)}`)
   return args
 }
 

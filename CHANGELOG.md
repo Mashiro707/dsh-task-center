@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.3] - 2026-10-27
+
+### Fixed
+
+- Remote commands now run in a login shell. An ssh session starts a
+  non-interactive shell that never reads `/etc/profile`, so a toolchain kept
+  outside the default `PATH` — Go in `/usr/local/go/bin` — was missing from it
+  while the same user had it after logging in. Every check that called such a
+  tool failed with `<tool>: command not found` on the remote host.
+
 ## [1.7.2] - 2026-10-27
 
 ### Added
