@@ -13,8 +13,27 @@ import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { createRunner, service, type TaskRunner } from './runner.js'
 import { currentStage, DOC_ROOT, stageRelPath, writeStageDocs, type StageDocInput } from './stages.js'
+
+/**
+ * Version of the running build.
+ *
+ * The panel question "did the host pick up the new code?" came up every time
+ * this plugin changed: an old process keeps serving its old module until the app
+ * is restarted. Reporting the version the module was loaded from answers it
+ * without reading files.
+ */
+const PACKAGE_VERSION = (() => {
+  try {
+    const url = new URL('./package.json', import.meta.url)
+    const raw = JSON.parse(readFileSync(url, 'utf8')) as { version?: unknown }
+    return typeof raw.version === 'string' ? raw.version : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+})()
 
 /** One HTTP request as handed to a route handler. */
 type HttpRequest = import('node:http').IncomingMessage
@@ -1324,6 +1343,7 @@ export function apply(ctx: HostContext): void {
         ...(await runner.settings()),
         ...runner.stats(),
         available: service(ctx, 'sessionController') !== undefined,
+        version: PACKAGE_VERSION,
         toolsError: toolSetupError,
       }
     },

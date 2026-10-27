@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] - 2026-10-27
+
+### Added
+
+- `/task-center/api/settings` reports `version`, the build the running host
+  actually loaded. After a restart the panel can prove it is serving the new
+  code instead of looking identical to the old one.
+
 ## [1.7.1] - 2026-10-27
 
 ### Fixed
