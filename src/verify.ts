@@ -6,6 +6,7 @@
  * stage cannot be marked complete by assertion.
  */
 import { spawn } from 'node:child_process'
+import { statSync } from 'node:fs'
 
 /** Default wall-clock limit for one command. */
 export const DEFAULT_VERIFY_TIMEOUT_MS = 120_000
@@ -30,6 +31,54 @@ export interface VerifyOutcome {
 }
 
 /**
+ * The shell a command runs in.
+ *
+ * Stage documents are written in POSIX shell (`test -f`, `grep -q`, `&&`), and
+ * planning agents write them that way on every host. On Windows the default
+ * `shell: true` is cmd.exe, where those commands do not exist, so every check
+ * fails for a reason that has nothing to do with the stage. Git Bash is the
+ * shell the rest of this toolchain already expects; use it when it is there and
+ * fall back to the platform default only when it is not.
+ */
+interface ShellChoice {
+  command: string | null
+  args: (command: string) => string[]
+}
+
+let cachedShell: ShellChoice | undefined
+
+function resolveShell(): ShellChoice {
+  if (cachedShell !== undefined) return cachedShell
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:/Program Files/Git/bin/bash.exe',
+      'C:/Program Files/Git/usr/bin/bash.exe',
+      'C:/Program Files (x86)/Git/bin/bash.exe',
+    ]
+    for (const candidate of candidates) {
+      try {
+        if (statSync(candidate).isFile()) {
+          cachedShell = { command: candidate, args: (line: string) => ['-c', line] }
+          return cachedShell
+        }
+      } catch {
+        /* keep looking */
+      }
+    }
+    cachedShell = { command: null, args: () => [] }
+    return cachedShell
+  }
+  cachedShell = { command: '/bin/sh', args: (line: string) => ['-c', line] }
+  return cachedShell
+}
+
+/** @returns {string} the shell a verification command runs in, for messages. */
+export function verifyShellName(): string {
+  const shell = resolveShell()
+  return shell.command === null ? 'the platform shell' : 'bash'
+}
+
+/**
  * @param {string} command - shell command line from the document.
  * @param {string} cwd - directory to run it in.
  * @param {number} timeoutMs - wall-clock limit.
@@ -48,13 +97,21 @@ export function runCommand(command: string, cwd: string, timeoutMs: number): Pro
       resolve(outcome)
     }
     let child
+    const shell = resolveShell()
     try {
-      child = spawn(command, {
-        cwd,
-        shell: true,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
+      child =
+        shell.command === null
+          ? spawn(command, {
+              cwd,
+              shell: true,
+              windowsHide: true,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            })
+          : spawn(shell.command, shell.args(command), {
+              cwd,
+              windowsHide: true,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            })
     } catch (error) {
       finish({
         command,

@@ -6,10 +6,43 @@
  * stage cannot be marked complete by assertion.
  */
 import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
 /** Default wall-clock limit for one command. */
 export const DEFAULT_VERIFY_TIMEOUT_MS = 120_000;
 /** How much of a command's combined output is kept, in bytes. */
 const MAX_OUTPUT_BYTES = 16 * 1024;
+let cachedShell;
+function resolveShell() {
+    if (cachedShell !== undefined)
+        return cachedShell;
+    if (process.platform === 'win32') {
+        const candidates = [
+            'C:/Program Files/Git/bin/bash.exe',
+            'C:/Program Files/Git/usr/bin/bash.exe',
+            'C:/Program Files (x86)/Git/bin/bash.exe',
+        ];
+        for (const candidate of candidates) {
+            try {
+                if (statSync(candidate).isFile()) {
+                    cachedShell = { command: candidate, args: (line) => ['-c', line] };
+                    return cachedShell;
+                }
+            }
+            catch {
+                /* keep looking */
+            }
+        }
+        cachedShell = { command: null, args: () => [] };
+        return cachedShell;
+    }
+    cachedShell = { command: '/bin/sh', args: (line) => ['-c', line] };
+    return cachedShell;
+}
+/** @returns {string} the shell a verification command runs in, for messages. */
+export function verifyShellName() {
+    const shell = resolveShell();
+    return shell.command === null ? 'the platform shell' : 'bash';
+}
 /**
  * @param {string} command - shell command line from the document.
  * @param {string} cwd - directory to run it in.
@@ -31,13 +64,21 @@ export function runCommand(command, cwd, timeoutMs) {
             resolve(outcome);
         };
         let child;
+        const shell = resolveShell();
         try {
-            child = spawn(command, {
-                cwd,
-                shell: true,
-                windowsHide: true,
-                stdio: ['ignore', 'pipe', 'pipe'],
-            });
+            child =
+                shell.command === null
+                    ? spawn(command, {
+                        cwd,
+                        shell: true,
+                        windowsHide: true,
+                        stdio: ['ignore', 'pipe', 'pipe'],
+                    })
+                    : spawn(shell.command, shell.args(command), {
+                        cwd,
+                        windowsHide: true,
+                        stdio: ['ignore', 'pipe', 'pipe'],
+                    });
         }
         catch (error) {
             finish({

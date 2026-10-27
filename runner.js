@@ -647,9 +647,11 @@ export function createRunner(ctx, store) {
         }
         const failure = outcomes.find(outcome => !outcome.ok);
         if (failure !== undefined) {
+            const brief = briefOutput(failure.output);
             await patchStage(task.id, stage.index, {
                 status: 'failed',
-                message: `验收没通过：${failure.command}${failure.timedOut ? '（超时）' : ''}`,
+                message: `验收没通过：${failure.command}${failure.timedOut ? '（超时）' : ''}` +
+                    (brief === '' ? '' : `（${brief}）`),
                 output: failure.output,
                 endedAt: Date.now(),
             });
@@ -660,6 +662,21 @@ export function createRunner(ctx, store) {
             .join('\n\n')
             .slice(0, 4000);
         await advanceStage(task, stage, output);
+    }
+    /**
+     * Pick the one line of command output worth showing on a card.
+     * @param {string} output - combined output of the failed command.
+     * @returns {string} a short reason, or '' when there is nothing to say.
+     */
+    function briefOutput(output) {
+        const lines = output
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line !== '');
+        if (lines.length === 0)
+            return '';
+        const line = lines[lines.length - 1];
+        return line.length > 120 ? line.slice(0, 117) + '...' : line;
     }
     /**
      * Mark one stage done and open the review of the next one.

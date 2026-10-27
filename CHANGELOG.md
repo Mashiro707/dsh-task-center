@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-10-26
+
+### Fixed
+
+- Verification commands now run in bash, not cmd.exe. Stage documents are
+  written in POSIX shell (`test -f`, `grep -q`, `&&`), and on Windows the
+  platform shell has none of those commands, so every stage that declared such
+  a check failed for a reason unrelated to the work. When Git Bash is installed
+  it runs the command; otherwise the platform shell is still used.
+- A failed check now carries the last line of its own output on the card, so the
+  reason is visible without opening the stage document.
+
 ## [1.5.3] - 2026-10-26
 
 ### Changed
