@@ -427,7 +427,12 @@ test('auto-run stays off until it is switched on', async () => {
     const doing = await store.create({ title: '自动开跑', status: 'doing', cwd: 'C:/work/app' })
     runner.onTaskChanged(doing)
     await waitFor(() => host.created.length === 1)
-    const row = (await store.list()).tasks.find((entry) => entry.id === doing.id)
+    // The row is written after the session exists, so waiting for the session
+    // alone can still observe a null run: wait for the row itself.
+    const row = await waitFor(async () => {
+      const found = (await store.list()).tasks.find((entry) => entry.id === doing.id)
+      return found !== undefined && found.run !== null && found.run.status === 'running' ? found : null
+    })
     assert.equal(row.run.status, 'running')
   } finally {
     await dispose()
