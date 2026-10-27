@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-10-27
+
+### Added
+
+- A failed stage can be re-checked on its own. Verification is the step that
+  fails when the environment, not the work, is wrong, and repeating the whole
+  stage to find that out costs an agent run. The drawer offers **Re-check** on a
+  failed stage: it re-runs the document's acceptance commands and advances the
+  stage when they pass.
+
+### Fixed
+
+- The auto-run test waited for the session instead of the row, so it could read
+  a null run on a slow runner (failed once on Node 24 CI).
+
 ## [1.6.0] - 2026-10-27
 
 ### Added

@@ -71,6 +71,8 @@ window.__ModuleLoader__.load({
                 stageFailed: '失败',
                 approve: '批准',
                 reject: '驳回',
+                reverify: '重新验收',
+                noticeReverified: '验收通过，进入下一阶段',
                 viewDoc: '查看文档',
                 crashTitle: '面板出错了，错误详情已记录到任务板（[client-error] 开头的任务）。',
                 hideDoc: '收起文档',
@@ -203,6 +205,8 @@ window.__ModuleLoader__.load({
                 stageFailed: 'Failed',
                 approve: 'Approve',
                 reject: 'Reject',
+                reverify: 'Re-check',
+                noticeReverified: 'Check passed; the next stage is open',
                 viewDoc: 'View document',
                 crashTitle: 'The panel hit an error; the details were filed on the board as a [client-error] task.',
                 hideDoc: 'Hide document',
@@ -1147,6 +1151,12 @@ window.__ModuleLoader__.load({
                             className: 'tc-btn tc-btn-primary',
                             onClick: () => act('approveStage', index + 1),
                         }, t('approve'))
+                        : null, entry.status === 'failed'
+                        ? h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-quiet',
+                            onClick: () => act('reverify', index + 1),
+                        }, t('reverify'))
                         : null, awaiting
                         ? h('button', {
                             type: 'button',
@@ -1540,7 +1550,11 @@ window.__ModuleLoader__.load({
                     await refresh();
                     setNotice({
                         kind: 'ok',
-                        text: action === 'approveStage' ? t('noticeApproved') : t('noticeRejected'),
+                        text: action === 'approveStage'
+                            ? t('noticeApproved')
+                            : action === 'reverify'
+                                ? t('noticeReverified')
+                                : t('noticeRejected'),
                     });
                 }
                 catch (error) {

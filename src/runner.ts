@@ -94,6 +94,8 @@ export interface TaskRunner {
    * @returns {Promise<TaskRecord>} the task with the stage back in `draft`.
    */
   rejectStage(taskId: string, ordinal?: number, feedback?: string): Promise<TaskRecord>
+  /** Re-run the acceptance commands of a failed stage without another agent run. */
+  reverify(taskId: string): Promise<TaskRecord>
   /**
    * Read one stage document for the panel preview.
    * @param {string} taskId - the task owning the stage.
@@ -1487,6 +1489,44 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         return approved
       }
       return start(taskId)
+    },
+
+    async reverify(taskId: string): Promise<TaskRecord> {
+      const board = await store.list()
+      const task = board.tasks.find(entry => entry.id === taskId)
+      if (task === undefined) throw runnerError('not-found', `找不到任务 ${taskId}。`)
+      const stage = currentStage(task)
+      if (stage === null) throw runnerError('no-stage', '这个任务没有待执行的阶段。')
+      if (stage.status !== 'failed') {
+        throw runnerError('not-failed', `阶段 ${stage.index} 现在不是失败状态，不用重新验收。`)
+      }
+      if (stage.verify.length === 0) throw runnerError('no-verify', '阶段文档没有声明验收命令。')
+      const outcomes = await runVerifyCommands(stage.verify, workspaceRoot(task), DEFAULT_VERIFY_TIMEOUT_MS)
+      const failure = outcomes.find(outcome => !outcome.ok)
+      if (failure !== undefined) {
+        const brief = briefOutput(failure.output === '' ? (failure.error ?? '') : failure.output)
+        const where = failure.where === 'remote' ? '（远端）' : ''
+        await patchStage(task.id, stage.index, {
+          status: 'failed',
+          message:
+            (failure.error !== null
+              ? `验收没能跑起来：${failure.error}`
+              : `验收没通过${where}：${failure.command}`) + (brief === '' ? '' : `（${brief}）`),
+          output: failure.output,
+          endedAt: Date.now(),
+        })
+        throw runnerError('verify-failed', `验收仍未通过：${failure.command}`)
+      }
+      const output = outcomes
+        .map(outcome => `$ ${outcome.command}\n${outcome.output}`)
+        .join('\n\n')
+        .slice(0, 4000)
+      await advanceStage(task, stage, output)
+      note(`stage ${stage.index} re-verified`)
+      const after = await store.list()
+      const updated = after.tasks.find(entry => entry.id === taskId)
+      if (updated === undefined) throw runnerError('not-found', `找不到任务 ${taskId}。`)
+      return updated
     },
 
     async rejectStage(taskId: string, ordinal?: number, feedback?: string): Promise<TaskRecord> {

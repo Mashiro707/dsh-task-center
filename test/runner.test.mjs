@@ -1216,3 +1216,70 @@ test('every agent tool satisfies the host schema subset', async () => {
     await store.dispose()
   }
 })
+
+test('a failed stage can be re-checked without running the agent again', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({
+      title: '验收重跑',
+      cwd: process.cwd(),
+      stages: [{ title: '第一步', goal: '什么都不做', scope: [], verify: ['node -e "process.exit(0)"'] }],
+      stageIndex: 0,
+    })
+    await store.update({
+      id: task.id,
+      stageIndex: 0,
+      stages: [
+        {
+          title: '第一步',
+          goal: '什么都不做',
+          scope: [],
+          verify: ['node -e "process.exit(0)"'],
+          status: 'failed',
+        },
+      ],
+    })
+
+    const after = await runner.reverify(task.id)
+    assert.equal(after.stages[0].status, 'done')
+    assert.equal(host.created.length, 0, 'no agent run is needed to re-check')
+  } finally {
+    await dispose()
+  }
+})
+
+test('re-check keeps the stage failed when the command still fails', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({
+      title: '验收仍不过',
+      cwd: process.cwd(),
+      stages: [{ title: '第一步', goal: '什么都不做', scope: [], verify: ['node -e "process.exit(1)"'] }],
+      stageIndex: 0,
+    })
+    await store.update({
+      id: task.id,
+      stageIndex: 0,
+      stages: [
+        {
+          title: '第一步',
+          goal: '什么都不做',
+          scope: [],
+          verify: ['node -e "process.exit(1)"'],
+          status: 'failed',
+        },
+      ],
+    })
+
+    await assert.rejects(() => runner.reverify(task.id), /验收/)
+    const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+    assert.equal(row.stages[0].status, 'failed')
+    assert.match(String(row.stages[0].message), /验收/)
+  } finally {
+    await dispose()
+  }
+})

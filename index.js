@@ -1276,6 +1276,7 @@ export function apply(ctx) {
         run: input => runner.start(requireId(input)),
         cancelRun: input => runner.cancel(requireId(input)),
         approveStage: input => runner.approveStage(requireId(input), optionalOrdinal(input)),
+        reverify: input => runner.reverify(requireId(input)),
         rejectStage: input => runner.rejectStage(requireId(input), optionalOrdinal(input), typeof input.feedback === 'string' ? input.feedback : undefined),
         stageDoc: input => runner.stageDoc(requireId(input), optionalOrdinal(input)),
         settings: async () => {

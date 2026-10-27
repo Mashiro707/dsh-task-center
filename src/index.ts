@@ -1306,6 +1306,7 @@ export function apply(ctx: HostContext): void {
     run: input => runner.start(requireId(input)),
     cancelRun: input => runner.cancel(requireId(input)),
     approveStage: input => runner.approveStage(requireId(input), optionalOrdinal(input)),
+    reverify: input => runner.reverify(requireId(input)),
     rejectStage: input =>
       runner.rejectStage(
         requireId(input),
