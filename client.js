@@ -72,6 +72,9 @@ window.__ModuleLoader__.load({
                 stageReason: '失败原因',
                 approve: '批准',
                 reject: '驳回',
+                rejectWhy: '为什么不接受这份文档？这段说明会写进重新规划的提示词。',
+                rejectConfirm: '确认驳回',
+                rejectCancel: '取消',
                 reverify: '重新验收',
                 noticeReverified: '验收通过，进入下一阶段',
                 viewDoc: '查看文档',
@@ -207,6 +210,9 @@ window.__ModuleLoader__.load({
                 stageReason: 'Why it failed',
                 approve: 'Approve',
                 reject: 'Reject',
+                rejectWhy: 'Why is this document not acceptable? The text is handed to the planning agent.',
+                rejectConfirm: 'Reject it',
+                rejectCancel: 'Cancel',
                 reverify: 'Re-check',
                 noticeReverified: 'Check passed; the next stage is open',
                 viewDoc: 'View document',
@@ -938,6 +944,10 @@ window.__ModuleLoader__.load({
             const stageIndex = typeof task.stageIndex === 'number' ? task.stageIndex : 0;
             const [doc, setDoc] = useState(null);
             const [docBusy, setDocBusy] = useState(false);
+            // Rejecting asks why: the reason is handed to the planning agent, which is
+            // the only way it can tell what the last document got wrong.
+            const [rejectOpen, setRejectOpen] = useState(null);
+            const [rejectText, setRejectText] = useState('');
             const stageLabel = {
                 draft: t('stageDraft'),
                 'awaiting-approval': t('stageAwait'),
@@ -963,8 +973,8 @@ window.__ModuleLoader__.load({
                     setDocBusy(false);
                 }
             };
-            const act = (action, ordinal) => {
-                void props.onStageAction(task.id, ordinal, action);
+            const act = (action, ordinal, feedback) => {
+                void props.onStageAction(task.id, ordinal, action, feedback);
             };
             const globalPreset = typeof props.globalPreset === 'string' && props.globalPreset !== '' ? props.globalPreset : 'auto';
             const presetLabel = permissions.find((option) => option.value === globalPreset);
@@ -1163,9 +1173,33 @@ window.__ModuleLoader__.load({
                         ? h('button', {
                             type: 'button',
                             className: 'tc-btn tc-btn-danger',
-                            onClick: () => act('rejectStage', index + 1),
+                            onClick: () => {
+                                setRejectOpen(index + 1);
+                                setRejectText('');
+                            },
                         }, t('reject'))
-                        : null), entry.message === null || entry.message === ''
+                        : null), rejectOpen === index + 1
+                        ? h('div', { className: 'tc-reject' }, h('textarea', {
+                            className: 'tc-input tc-reject-input',
+                            value: rejectText,
+                            rows: 2,
+                            placeholder: t('rejectWhy'),
+                            onChange: (event) => setRejectText(event.target.value),
+                        }), h('div', { className: 'tc-reject-acts' }, h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-quiet',
+                            onClick: () => setRejectOpen(null),
+                        }, t('rejectCancel')), h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-danger',
+                            onClick: () => {
+                                const reason = rejectText.trim();
+                                setRejectOpen(null);
+                                setRejectText('');
+                                act('rejectStage', index + 1, reason === '' ? undefined : reason);
+                            },
+                        }, t('rejectConfirm'))))
+                        : null, entry.message === null || entry.message === ''
                         ? null
                         : h('details', { className: 'tc-stage-note' }, h('summary', {}, t('stageReason')), h('div', { className: 'tc-stage-msg' }, entry.message), entry.output === null || entry.output === ''
                             ? null
@@ -1550,9 +1584,12 @@ window.__ModuleLoader__.load({
                     setNotice({ kind: 'ok', text: t('noticeCanceled') });
             };
             /** Approve or reject the document of one stage, then re-read the board. */
-            const stageAction = async (id, ordinal, action) => {
+            const stageAction = async (id, ordinal, action, feedback) => {
                 try {
-                    await call(action, { id, ordinal });
+                    const payload = { id, ordinal };
+                    if (typeof feedback === 'string' && feedback.trim() !== '')
+                        payload.feedback = feedback.trim();
+                    await call(action, payload);
                     await refresh();
                     setNotice({
                         kind: 'ok',
@@ -1991,6 +2028,9 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-pill.tc-stage-failed{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
 .tc-stage-pill.tc-stage-done{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 38%,transparent)}
 .tc-stage-acts{flex:0 0 auto;display:inline-flex;gap:4px}
+.tc-reject{flex:1 0 100%;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:6px}
+.tc-reject-input{width:100%;min-height:52px;resize:vertical;line-height:1.5;padding:6px 9px}
+.tc-reject-acts{display:flex;justify-content:flex-end;gap:6px}
 .tc-stage{flex-wrap:wrap}
 .tc-stage-note{flex:1 0 100%;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary)}
 .tc-stage-note summary{cursor:pointer;color:var(--dsw-alias-state-error-primary)}

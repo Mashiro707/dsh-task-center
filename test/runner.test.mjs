@@ -1198,6 +1198,47 @@ test('rejecting a document sends the stage back to planning', async () => {
   }
 })
 
+test('the reason a document was rejected reaches the planning agent', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '驳回带理由', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { status: 'awaiting-approval' })
+
+    await runner.rejectStage(task.id, undefined, '验收命令用了不存在的脚本')
+    const run = await runner.start(task.id)
+
+    const prompt = host.agents.get(run.run.sessionId).inbox[0].content[0].text
+    assert.match(prompt, /上一轮文档被驳回的原因/, 'the planner is told why the last document failed')
+    assert.match(prompt, /验收命令用了不存在的脚本/, 'the text the user typed is carried over verbatim')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a rejection without words still tells the planner what happened', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '沉默驳回', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { status: 'awaiting-approval' })
+
+    await runner.rejectStage(task.id)
+    const run = await runner.start(task.id)
+
+    const prompt = host.agents.get(run.run.sessionId).inbox[0].content[0].text
+    assert.match(prompt, /文档被驳回，请重新规划/, 'the default reason is carried too')
+  } finally {
+    await dispose()
+  }
+})
+
 test('every agent tool satisfies the host schema subset', async () => {
   const store = await makeStore()
   const host = makeHost()

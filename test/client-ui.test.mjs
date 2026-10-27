@@ -223,6 +223,17 @@ test('a failed stage shows why it failed', () => {
   assert.match(css, /\.tc-stage\{flex-wrap:wrap\}/, 'the reason wraps under the row')
 })
 
+test('rejecting a document asks why', () => {
+  assert.match(source, /t\('rejectWhy'\)/, 'the box explains what the text is for')
+  assert.match(source, /className: 'tc-input tc-reject-input'/, 'the reason is a textarea')
+  assert.match(source, /t\('rejectConfirm'\)/, 'the rejection is confirmed, not immediate')
+  assert.match(source, /t\('rejectCancel'\)/, 'the writer can back out')
+  assert.match(source, /act\('rejectStage', index \+ 1, reason/, 'the typed text is sent with the rejection')
+  assert.match(source, /payload\.feedback = feedback\.trim\(\)/, 'the page puts the reason on the request')
+  assert.match(css, /\.tc-reject\{/, 'the reason block has its own surface')
+  assert.match(css, /\.tc-reject-input\{/, 'the textarea is part of the control family')
+})
+
 test('the card order survives numeric timestamps', () => {
   // The host stores epoch milliseconds, so the comparator must never call a
   // string method on them; the panel used to blank out as soon as two tasks

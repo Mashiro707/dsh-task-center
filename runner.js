@@ -116,6 +116,7 @@ export function buildPrompt(task, cwd, board = []) {
  * @returns {string} the prompt.
  */
 export function buildPlanPrompt(task, cwd, stage) {
+    const rejected = typeof stage.message === 'string' ? stage.message.trim() : '';
     return [
         '你是任务中心自动拉起的规划智能体。这一轮只写文档，不改代码。',
         '',
@@ -124,6 +125,7 @@ export function buildPlanPrompt(task, cwd, stage) {
         `阶段序号：${stage.index}　阶段标题：${stage.title}`,
         `工作目录：${cwd}`,
         `文档将写到：${stage.docPath}`,
+        ...(rejected === '' ? [] : ['', '上一轮文档被驳回的原因（这一份必须解决它）：', rejected]),
         '',
         '说明：',
         task.notes.trim() === '' ? '（无）' : task.notes.trim(),

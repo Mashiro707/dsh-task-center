@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-27
+
+### Added
+
+- Rejecting a document asks why. The reason is stored on the stage and handed
+  to the planning agent, which otherwise only knew that the last document was
+  refused and had to guess what was wrong with it.
+
 ## [1.7.3] - 2026-10-27
 
 ### Fixed
