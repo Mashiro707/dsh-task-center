@@ -94,6 +94,7 @@ window.__ModuleLoader__.load({
         stageRunning: '执行中',
         stageDone: '已完成',
         stageFailed: '失败',
+        stageReason: '失败原因',
         approve: '批准',
         reject: '驳回',
         reverify: '重新验收',
@@ -228,6 +229,7 @@ window.__ModuleLoader__.load({
         stageRunning: 'Running',
         stageDone: 'Done',
         stageFailed: 'Failed',
+        stageReason: 'Why it failed',
         approve: 'Approve',
         reject: 'Reject',
         reverify: 'Re-check',
@@ -1539,6 +1541,17 @@ window.__ModuleLoader__.load({
                             )
                           : null,
                       ),
+                      entry.message === null || entry.message === ''
+                        ? null
+                        : h(
+                            'details',
+                            { className: 'tc-stage-note' },
+                            h('summary', {}, t('stageReason')),
+                            h('div', { className: 'tc-stage-msg' }, entry.message),
+                            entry.output === null || entry.output === ''
+                              ? null
+                              : h('pre', { className: 'tc-stage-out' }, entry.output),
+                          ),
                     )
                   }),
                 ),
@@ -2602,6 +2615,11 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-pill.tc-stage-failed{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
 .tc-stage-pill.tc-stage-done{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 38%,transparent)}
 .tc-stage-acts{flex:0 0 auto;display:inline-flex;gap:4px}
+.tc-stage{flex-wrap:wrap}
+.tc-stage-note{flex:1 0 100%;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.tc-stage-note summary{cursor:pointer;color:var(--dsw-alias-state-error-primary)}
+.tc-stage-msg{margin-top:4px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-primary)}
+.tc-stage-out{margin:4px 0 0;padding:6px;max-height:180px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .tc-btn-quiet{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}
 .tc-btn-quiet:hover{color:var(--dsw-alias-label-primary)}
 .tc-doc{margin:0;max-height:260px;overflow:auto;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}

@@ -135,6 +135,38 @@ export function shellQuote(value: string): string {
 }
 
 /**
+ * Where a locally written path lives on the host that owns the workspace.
+ *
+ * A workspace is mirrored locally as a root directory, so anything under that
+ * root is a suffix of it: the same place is the workspace's remote path followed
+ * by that suffix. A worktree created by the task lives under the mirror and maps
+ * the same way, which is why this is the only conversion the runner needs. A
+ * path outside the mirror is already absolute on that host and only needs its
+ * separators normalised.
+ * @param {string} localRoot - local path of the workspace, '' when unknown.
+ * @param {string} remoteRoot - the same directory on its host.
+ * @param {string} dir - the path to translate.
+ * @returns {string} the path to use over ssh.
+ */
+export function mapToRemotePath(localRoot: string, remoteRoot: string, dir: string): string {
+  const base = remoteRoot.replace(/[\\/]+$/, '')
+  const local = (localRoot ?? '').replace(/[\\/]+$/, '')
+  if (dir === '' || (local !== '' && dir === local)) return base
+  const inside =
+    local !== '' && (dir.startsWith(local + '/') || dir.startsWith(local + '\\') || dir.startsWith(base + '/'))
+  if (inside) {
+    const rest = dir
+      .slice(dir.startsWith(base + '/') ? base.length : local.length)
+      .split(/[\\/]+/)
+      .filter(part => part !== '')
+      .join('/')
+    return rest === '' ? base : base + '/' + rest
+  }
+  const normalised = dir.split(/[\\/]+/).filter(part => part !== '').join('/')
+  return dir.startsWith('/') ? '/' + normalised : normalised
+}
+
+/**
  * @returns {string} the ssh client to use.
  */
 export function sshPath(): string {

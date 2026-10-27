@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-10-27
+
+### Fixed
+
+- Remote workspaces verify in the right directory again. The path a run works
+  in is a local one, and it was handed to ssh unchanged, so the remote shell
+  tried `cd C:\Users\...\work` and reported `No such file or directory` on
+  every check. Paths under the mirror now map onto the path the host owns,
+  which is also what lets a task create its worktree on that host.
+- A failed stage now says why. The reason and the output of the command that
+  failed are rendered under the stage in the drawer instead of only living in
+  the stored task.
+
 ## [1.7.0] - 2026-10-27
 
 ### Added

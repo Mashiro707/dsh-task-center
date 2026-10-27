@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
-import { resolveRemote, runRemoteCommand, shellQuote } from './remote.js'
+import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js'
 import type { RemoteTarget } from './remote.js'
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js'
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js'
@@ -664,10 +664,26 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     return base === '' ? null : resolveRemote(base)
   }
 
-  /** Host to verify on: the one that owns the workspace, pointed at the workdir. */
-  function verifyTarget(task: TaskRecord): RemoteTarget | null {
+  /**
+   * The directory a local path maps to on the host owning the workspace.
+   *
+   * A task's paths are written locally: the workspace is a mirror root, and a
+   * worktree is a suffix under it. On the host that really owns the files the
+   * same place is the workspace's remote path followed by that suffix. A path
+   * that carries no mirror prefix is assumed to be absolute there already.
+   * @param {TaskRecord} task - the task.
+   * @param {RemoteTarget} target - its remote host.
+   * @param {string} dir - a local directory of this task.
+   * @returns {string} the path to use over ssh.
+   */
+  function toHostPath(task: TaskRecord, target: RemoteTarget, dir: string): string {
+    return mapToRemotePath(workspaceBase(task), target.remotePath, dir)
+  }
+
+  /** Host to verify on, pointed at the directory the run works in. */
+  function verifyTarget(task: TaskRecord): RemoteTarget | undefined {
     const target = remoteOf(task)
-    return target === null ? null : { ...target, remotePath: workspaceRoot(task) }
+    return target === null ? undefined : { ...target, remotePath: toHostPath(task, target, workspaceRoot(task)) }
   }
 
   /** Run one shell command where the directory really lives. */
@@ -677,7 +693,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       const outcome = await runCommand(command, dir, DEFAULT_VERIFY_TIMEOUT_MS)
       return { ok: outcome.ok, output: outcome.output === '' ? (outcome.error ?? '') : outcome.output }
     }
-    const outcome = await runRemoteCommand({ ...target, remotePath: dir }, command)
+    const outcome = await runRemoteCommand({ ...target, remotePath: toHostPath(task, target, dir) }, command)
     return { ok: outcome.code === 0, output: outcome.output }
   }
 
@@ -709,7 +725,13 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       if (names.length === 0) return null
       const scope = currentStage(task)?.scope ?? []
       const joined = names.map(name => (base.replace(/[\/]+$/, '') + '/' + name))
-      const picked = pickRepo(joined, scope, () => false)
+      // Scope entries are written either with the repository prefix or relative
+      // to it; score a candidate by that prefix so several repositories in one
+      // workspace stay decidable without touching the remote host.
+      const picked = pickRepo(joined, scope, (repo, entry) => {
+        const name = repo.split(/[\\/]/).filter(part => part !== '').pop() ?? ''
+        return entry === name || entry.startsWith(name + '/') || repo.replace(/\\/g, '/').endsWith('/' + entry.split('/')[0])
+      })
       const chosen = scope.length === 0 ? (joined.length === 1 ? joined[0] : null) : picked
       if (chosen === null) {
         throw runnerError(

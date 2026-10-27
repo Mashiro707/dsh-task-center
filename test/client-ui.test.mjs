@@ -214,6 +214,15 @@ test('a stage shows its document and waits for an approval click', () => {
   assert.match(source, /onStageAction/, 'the drawer asks the page to approve or reject')
 })
 
+test('a failed stage shows why it failed', () => {
+  assert.match(source, /t\('stageReason'\)/, 'the failure reason needs a label')
+  assert.match(source, /className: 'tc-stage-note'/, 'the reason is rendered under the stage row')
+  assert.match(source, /entry\.message/, 'the reason comes from the stage record')
+  assert.match(source, /className: 'tc-stage-out'/, 'the command output is shown with the reason')
+  assert.match(css, /\.tc-stage-note\{/, 'the reason block has its own surface')
+  assert.match(css, /\.tc-stage\{flex-wrap:wrap\}/, 'the reason wraps under the row')
+})
+
 test('the card order survives numeric timestamps', () => {
   // The host stores epoch milliseconds, so the comparator must never call a
   // string method on them; the panel used to blank out as soon as two tasks

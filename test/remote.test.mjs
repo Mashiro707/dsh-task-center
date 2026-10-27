@@ -13,6 +13,7 @@ import { join } from 'node:path'
 
 import {
   buildSshArgs,
+  mapToRemotePath,
   readMirrorMarker,
   readVaultHost,
   resolveRemote,
@@ -163,4 +164,22 @@ test('single quotes survive shell quoting', () => {
 
 test('the ssh client is always named', () => {
   assert.match(sshPath(), /ssh(\.exe)?$/)
+})
+
+test('a mirrored path maps onto the path that host really owns', () => {
+  const local = String.raw`C:\Users\mashi\.dsh\workspaces\remote\10.0.0.9-root-2222\work`
+  const remote = '/root/go/work'
+  assert.equal(mapToRemotePath(local, remote, local), '/root/go/work', 'the mirror root is the remote root')
+  assert.equal(
+    mapToRemotePath(local, remote, local + String.raw`\.worktrees\t_abc`),
+    '/root/go/work/.worktrees/t_abc',
+    'a worktree under the mirror maps the same way',
+  )
+  assert.equal(mapToRemotePath(local, remote, ''), '/root/go/work', 'an empty path means the root')
+})
+
+test('a path already absolute on the host is passed through', () => {
+  const local = String.raw`C:\mirror\work`
+  assert.equal(mapToRemotePath(local, '/root/go/work', '/root/go/work/x'), '/root/go/work/x')
+  assert.equal(mapToRemotePath(local, '/root/go/work/', '/srv/other'), '/srv/other', 'trailing slashes do not leak')
 })
