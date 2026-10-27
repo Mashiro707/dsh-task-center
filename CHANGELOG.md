@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-27
+
+### Added
+
+- Verification runs on the machine the workspace lives on. A remote workspace
+  is a local mirror holding only what the panel wrote, so `test -f`, `grep -q`
+  or `go test` against it could never say anything about the work. When the
+  workspace directory carries a `dsh-workspace/remote` marker and its host is in
+  the workspace vault, every verification command now runs there over `ssh`.
+- Stage documents are written to the remote workspace as well as the mirror.
+
+### Fixed
+
+- A verification that could not start now says why and names the remote host
+  instead of reporting a plain non-zero exit.
+
 ## [1.5.4] - 2026-10-26
 
 ### Fixed

@@ -7,6 +7,7 @@
  * document and the gate can never disagree.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { resolveRemote, writeRemoteFile } from './remote.js';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 /**
  * Pick the stage the task is working on.
@@ -92,12 +93,17 @@ export function renderStageDoc(stage, ordinal, taskTitle) {
  */
 export async function writeStageDocs(root, taskId, stages, taskTitle) {
     const written = [];
+    const remote = resolveRemote(root);
     for (let position = 0; position < stages.length; position += 1) {
         const ordinal = position + 1;
         const relPath = stageRelPath(taskId, ordinal);
         const absPath = stageAbsPath(root, relPath);
+        const text = renderStageDoc(stages[position], ordinal, taskTitle);
         await mkdir(dirname(absPath), { recursive: true });
-        await writeFile(absPath, renderStageDoc(stages[position], ordinal, taskTitle), 'utf8');
+        await writeFile(absPath, text, 'utf8');
+        if (remote !== null) {
+            await writeRemoteFile(remote, relPath, text);
+        }
         written.push(relPath);
     }
     return written;

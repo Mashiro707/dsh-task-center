@@ -7,6 +7,7 @@
  */
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
+import { resolveRemote, runRemoteCommand as runOverSsh } from './remote.js';
 /** Default wall-clock limit for one command. */
 export const DEFAULT_VERIFY_TIMEOUT_MS = 120_000;
 /** How much of a command's combined output is kept, in bytes. */
@@ -141,12 +142,37 @@ export function runCommand(command, cwd, timeoutMs) {
  * @returns {Promise<VerifyOutcome[]>} outcomes, at most one failure at the end.
  */
 export async function runVerifyCommands(commands, cwd, timeoutMs = DEFAULT_VERIFY_TIMEOUT_MS) {
+    const remote = resolveRemote(cwd);
     const outcomes = [];
     for (const command of commands) {
+        if (remote !== null) {
+            const result = await runOverSsh(remote, command, timeoutMs);
+            const outcome = {
+                command,
+                ok: result.code === 0,
+                code: result.code,
+                timedOut: result.code === null && !result.connectionFailed,
+                output: result.output,
+                error: result.connectionFailed ? `连不上 ${remote.user}@${remote.host}：${result.output}` : null,
+                where: 'remote',
+            };
+            outcomes.push(outcome);
+            if (!outcome.ok)
+                break;
+            continue;
+        }
         const outcome = await runCommand(command, cwd, timeoutMs);
         outcomes.push(outcome);
         if (!outcome.ok)
             break;
     }
     return outcomes;
+}
+/**
+ * @param {string} cwd - workspace directory.
+ * @returns {string} '' for a local workspace, otherwise `user@host`.
+ */
+export function verifyTargetName(cwd) {
+    const remote = resolveRemote(cwd);
+    return remote === null ? '' : `${remote.user}@${remote.host}`;
 }

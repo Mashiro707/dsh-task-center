@@ -647,11 +647,14 @@ export function createRunner(ctx, store) {
         }
         const failure = outcomes.find(outcome => !outcome.ok);
         if (failure !== undefined) {
-            const brief = briefOutput(failure.output);
+            const brief = briefOutput(failure.output === '' ? (failure.error ?? '') : failure.output);
+            const where = failure.where === 'remote' ? '（远端）' : '';
+            const reason = failure.error !== null
+                ? `验收没能跑起来：${failure.error}`
+                : `验收没通过${where}：${failure.command}${failure.timedOut ? '（超时）' : ''}`;
             await patchStage(task.id, stage.index, {
                 status: 'failed',
-                message: `验收没通过：${failure.command}${failure.timedOut ? '（超时）' : ''}` +
-                    (brief === '' ? '' : `（${brief}）`),
+                message: reason + (brief === '' ? '' : `（${brief}）`),
                 output: failure.output,
                 endedAt: Date.now(),
             });

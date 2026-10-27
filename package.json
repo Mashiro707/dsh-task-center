@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-center",
-  "version": "1.5.4",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
   "description": "Kanban task center for DeepSeek Harness: a four-column Web panel plus agent tools for managing tasks.",
@@ -33,7 +33,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/store.test.mjs test/client-ui.test.mjs test/runner.test.mjs"
+    "test": "node --test --test-concurrency=1 test/store.test.mjs test/client-ui.test.mjs test/runner.test.mjs test/remote.test.mjs"
   },
   "exports": {
     ".": "./index.js",
@@ -42,12 +42,14 @@
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./stages": "./stages.js",
-    "./verify": "./verify.js"
+    "./verify": "./verify.js",
+    "./remote": "./remote.js"
   },
   "files": [
     "index.js",
     "runner.js",
     "verify.js",
+    "remote.js",
     "stages.js",
     "client.js",
     "src",
