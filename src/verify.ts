@@ -8,6 +8,7 @@
 import { spawn } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { resolveRemote, runRemoteCommand as runOverSsh } from './remote.js'
+import type { RemoteTarget } from './remote.js'
 
 /** Default wall-clock limit for one command. */
 export const DEFAULT_VERIFY_TIMEOUT_MS = 120_000
@@ -177,8 +178,11 @@ export async function runVerifyCommands(
   commands: string[],
   cwd: string,
   timeoutMs: number = DEFAULT_VERIFY_TIMEOUT_MS,
+  target: RemoteTarget | null | undefined = undefined,
 ): Promise<VerifyOutcome[]> {
-  const remote = resolveRemote(cwd)
+  // The caller may already know where the directory lives: a worktree sits on
+  // the same host as the workspace but is not itself a mirror root.
+  const remote = target === undefined ? resolveRemote(cwd) : target
   const outcomes: VerifyOutcome[] = []
   for (const command of commands) {
     if (remote !== null) {

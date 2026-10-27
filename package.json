@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-center",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "description": "Kanban task center for DeepSeek Harness: a four-column Web panel plus agent tools for managing tasks.",
@@ -33,7 +33,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/store.test.mjs test/client-ui.test.mjs test/runner.test.mjs test/remote.test.mjs"
+    "test": "node --test test/store.test.mjs test/client-ui.test.mjs test/runner.test.mjs test/remote.test.mjs test/worktree.test.mjs"
   },
   "exports": {
     ".": "./index.js",
@@ -46,18 +46,19 @@
     "./remote": "./remote.js"
   },
   "files": [
-    "index.js",
-    "runner.js",
-    "verify.js",
-    "remote.js",
-    "stages.js",
     "client.js",
-    "src",
-    "tsconfig.host.json",
-    "tsconfig.client.json",
     "cordis.patch.yml",
+    "icon.svg",
+    "index.js",
     "locale/*.json",
-    "icon.svg"
+    "remote.js",
+    "runner.js",
+    "src",
+    "stages.js",
+    "tsconfig.client.json",
+    "tsconfig.host.json",
+    "verify.js",
+    "worktree.js"
   ],
   "dsh": {
     "bundle": {

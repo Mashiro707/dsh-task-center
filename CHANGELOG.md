@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-27
+
+### Added
+
+- Every task now works in a Git worktree of its own (`<repo>/.worktrees/<task id>`
+  on branch `task-center/<task id>`), created the first time it runs. Nothing
+  edits the branch you have checked out any more; the worktree path is stored on
+  the task and drives the gate, the verification and the stage documents.
+- With several repositories in one workspace the stage's allowed paths decide
+  which one the worktree belongs to.
+
 ## [1.6.1] - 2026-10-27
 
 ### Added

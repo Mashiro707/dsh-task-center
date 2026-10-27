@@ -11,8 +11,11 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
+import { resolveRemote, runRemoteCommand, shellQuote } from './remote.js'
+import type { RemoteTarget } from './remote.js'
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js'
-import { DEFAULT_VERIFY_TIMEOUT_MS, runVerifyCommands } from './verify.js'
+import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js'
+import { pickRepo, worktreeBranch, worktreePath } from './worktree.js'
 import type { VerifyOutcome } from './verify.js'
 
 /** How many runs may be alive at once when the caller asks for no particular cap. */
@@ -644,8 +647,100 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
    * @param {TaskRecord} task - the task.
    * @returns {string} an absolute path, or '' when the task has none.
    */
-  function workspaceRoot(task: TaskRecord): string {
+  /** The workspace the task was created in, before isolation. */
+  function workspaceBase(task: TaskRecord): string {
     return (task.workspacePath ?? task.cwd ?? '').trim()
+  }
+
+  /** Where the run actually works: its own worktree once one exists. */
+  function workspaceRoot(task: TaskRecord): string {
+    const workdir = (task.workdir ?? '').trim()
+    return workdir === '' ? workspaceBase(task) : workdir
+  }
+
+  /** Host that owns this task's workspace, when it is not this machine. */
+  function remoteOf(task: TaskRecord): RemoteTarget | null {
+    const base = workspaceBase(task)
+    return base === '' ? null : resolveRemote(base)
+  }
+
+  /** Host to verify on: the one that owns the workspace, pointed at the workdir. */
+  function verifyTarget(task: TaskRecord): RemoteTarget | null {
+    const target = remoteOf(task)
+    return target === null ? null : { ...target, remotePath: workspaceRoot(task) }
+  }
+
+  /** Run one shell command where the directory really lives. */
+  async function shellIn(task: TaskRecord, dir: string, command: string): Promise<{ ok: boolean; output: string }> {
+    const target = remoteOf(task)
+    if (target === null) {
+      const outcome = await runCommand(command, dir, DEFAULT_VERIFY_TIMEOUT_MS)
+      return { ok: outcome.ok, output: outcome.output === '' ? (outcome.error ?? '') : outcome.output }
+    }
+    const outcome = await runRemoteCommand({ ...target, remotePath: dir }, command)
+    return { ok: outcome.code === 0, output: outcome.output }
+  }
+
+  /**
+   * Give the task a checkout of its own, once.
+   * The branch is named after the task and lives in `.worktrees/<task id>` of
+   * the repository the stage touches, so the user's own branch is never edited.
+   * @param {TaskRecord} task - task about to run.
+   * @returns {Promise<string | null>} the directory to run in, or null when the
+   *   workspace is not a repository at all (then the run keeps the plain path).
+   */
+  async function ensureWorkdir(task: TaskRecord): Promise<string | null> {
+    const existing = (task.workdir ?? '').trim()
+    if (existing !== '') return existing
+    const base = workspaceBase(task)
+    if (base === '') return null
+
+    const top = await shellIn(task, base, 'git rev-parse --show-toplevel')
+    let repoRoot = top.ok ? top.output.trim() : ''
+    if (repoRoot === '') {
+      const listed = await shellIn(
+        task,
+        base,
+        'for d in */; do [ -d "$d/.git" ] && echo "${d%/}"; done',
+      )
+      const names = listed.ok
+        ? listed.output.split(/\r?\n/).map(line => line.trim()).filter(line => line !== '')
+        : []
+      if (names.length === 0) return null
+      const scope = currentStage(task)?.scope ?? []
+      const joined = names.map(name => (base.replace(/[\/]+$/, '') + '/' + name))
+      const picked = pickRepo(joined, scope, () => false)
+      const chosen = scope.length === 0 ? (joined.length === 1 ? joined[0] : null) : picked
+      if (chosen === null) {
+        throw runnerError(
+          'repo-ambiguous',
+          `这个工作区里有多个仓库（${names.join('、')}），当前阶段的改动路径不属于其中任何一个，没法决定在哪隔离。`,
+        )
+      }
+      repoRoot = chosen
+    }
+
+    const branch = worktreeBranch(task.id)
+    const path = worktreePath(repoRoot, task.id)
+    const listed = await shellIn(task, repoRoot, 'git worktree list --porcelain')
+    if (listed.ok && listed.output.includes(path)) {
+      await store.update({ id: task.id, workdir: path })
+      return path
+    }
+    const known = await shellIn(task, repoRoot, `git rev-parse --verify --quiet ${shellQuote(branch)}`)
+    const reuse = known.ok && known.output.trim() !== ''
+    const created = await shellIn(
+      task,
+      repoRoot,
+      reuse
+        ? `git worktree add ${shellQuote(path)} ${shellQuote(branch)}`
+        : `git worktree add -b ${shellQuote(branch)} ${shellQuote(path)} HEAD`,
+    )
+    if (!created.ok) {
+      throw runnerError('worktree-failed', `没能在这个仓库里建独立工作树：${briefOutput(created.output)}`)
+    }
+    await store.update({ id: task.id, workdir: path })
+    return path
   }
 
   /**
@@ -757,7 +852,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     const root = workspaceRoot(task)
     let outcomes: VerifyOutcome[] = []
     try {
-      outcomes = await runVerifyCommands(stage.verify, root, DEFAULT_VERIFY_TIMEOUT_MS)
+      outcomes = await runVerifyCommands(stage.verify, root, DEFAULT_VERIFY_TIMEOUT_MS, verifyTarget(task))
     } catch (error) {
       await patchStage(task.id, stage.index, {
         status: 'failed',
@@ -987,7 +1082,8 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     const config = await readSettings()
     const workspaceId = (task.workspaceId ?? '').trim()
     const cwd = (task.cwd ?? '').trim()
-    const root = workspaceRoot(task)
+    const workdir = await ensureWorkdir(task)
+    const root = workdir ?? workspaceRoot(task)
     if (root === '') throw runnerError('workspace-missing', '先给这个任务指定工作区，再让它开跑。')
     const mode = await resolveMode(task)
     // Retries count inside one kind of run: a fresh execute after a plan is not
@@ -997,7 +1093,11 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
 
     // Exactly one of the two: the Host rejects a request naming both.
     // A task that only carries a workspace path still needs that directory.
-    const created = await controller.create(workspaceId === '' ? { cwd: root } : { workspaceId })
+    // An isolated worktree is a directory the workspace itself does not name, so
+    // the run is pointed at it directly even when a workspace id is on the task.
+    const created = workdir !== null
+      ? await controller.create({ cwd: workdir })
+      : await controller.create(workspaceId === '' ? { cwd: root } : { workspaceId })
 
     // A cancel that landed while the session was being created wins: stop the
     // session we just made instead of handing it a prompt it should not run.
@@ -1031,7 +1131,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     let prompt = ''
     try {
       if (mode.kind === 'plan') {
-        prompt = buildPlanPrompt(task, workspaceId === '' ? cwd : root, mode.stage)
+        prompt = buildPlanPrompt(task, root, mode.stage)
       } else {
         const docText = await readStageDoc(root, mode.stage.docPath)
         prompt = buildStagePrompt(task, workspaceId === '' ? cwd : root, mode.stage, docText, board)
@@ -1501,7 +1601,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         throw runnerError('not-failed', `阶段 ${stage.index} 现在不是失败状态，不用重新验收。`)
       }
       if (stage.verify.length === 0) throw runnerError('no-verify', '阶段文档没有声明验收命令。')
-      const outcomes = await runVerifyCommands(stage.verify, workspaceRoot(task), DEFAULT_VERIFY_TIMEOUT_MS)
+      const outcomes = await runVerifyCommands(stage.verify, workspaceRoot(task), DEFAULT_VERIFY_TIMEOUT_MS, verifyTarget(task))
       const failure = outcomes.find(outcome => !outcome.ok)
       if (failure !== undefined) {
         const brief = briefOutput(failure.output === '' ? (failure.error ?? '') : failure.output)

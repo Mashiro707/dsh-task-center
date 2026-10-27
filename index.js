@@ -375,6 +375,7 @@ function normalizeRecord(raw) {
     const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now();
     const workspaceId = cleanText(raw.workspaceId);
     const workspacePath = cleanCwd(raw.workspacePath);
+    const workdir = cleanCwd(raw.workdir);
     const notes = typeof raw.notes === 'string' ? raw.notes : '';
     const deletedAt = Number.isFinite(raw.deletedAt) ? raw.deletedAt : null;
     let stages = normalizeStages(raw.stages, id);
@@ -395,6 +396,7 @@ function normalizeRecord(raw) {
         tags: Array.isArray(raw.tags) ? raw.tags.filter((tag) => typeof tag === 'string' && tag.trim() !== '') : [],
         workspaceId,
         workspacePath,
+        workdir,
         permission: cleanText(raw.permission),
         cwd: cleanCwd(raw.cwd),
         blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
@@ -608,6 +610,7 @@ export function createTaskStore(options = {}) {
                     tags: cleanTags(input.tags),
                     workspaceId,
                     workspacePath,
+                    workdir: null,
                     permission: cleanText(input.permission),
                     cwd: cleanCwd(input.cwd),
                     blockedBy: cleanIdList(input.blockedBy),
@@ -648,6 +651,8 @@ export function createTaskStore(options = {}) {
                     record.workspaceId = cleanText(input.workspaceId);
                 if (input.workspacePath !== undefined)
                     record.workspacePath = cleanCwd(input.workspacePath);
+                if (input.workdir !== undefined)
+                    record.workdir = cleanCwd(input.workdir);
                 if (input.permission !== undefined)
                     record.permission = cleanText(input.permission);
                 if (input.cwd !== undefined)

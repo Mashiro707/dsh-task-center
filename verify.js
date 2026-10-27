@@ -141,8 +141,10 @@ export function runCommand(command, cwd, timeoutMs) {
  * @param {number} [timeoutMs] - per-command limit.
  * @returns {Promise<VerifyOutcome[]>} outcomes, at most one failure at the end.
  */
-export async function runVerifyCommands(commands, cwd, timeoutMs = DEFAULT_VERIFY_TIMEOUT_MS) {
-    const remote = resolveRemote(cwd);
+export async function runVerifyCommands(commands, cwd, timeoutMs = DEFAULT_VERIFY_TIMEOUT_MS, target = undefined) {
+    // The caller may already know where the directory lives: a worktree sits on
+    // the same host as the workspace but is not itself a mirror root.
+    const remote = target === undefined ? resolveRemote(cwd) : target;
     const outcomes = [];
     for (const command of commands) {
         if (remote !== null) {

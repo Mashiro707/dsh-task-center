@@ -73,6 +73,8 @@ interface TaskRecord {
   workspaceId: string | null
   /** Absolute directory of that workspace, kept so the UI still renders without the registry. */
   workspacePath: string | null
+  /** Directory a run actually works in (the task's git worktree), when known. */
+  workdir: string | null
   /** Permission preset for this task's runs; null means "follow the global setting". */
   permission: string | null
   /** Absolute working directory an automatic run starts in; null until set. */
@@ -108,6 +110,7 @@ interface TaskCreateInput {
   parentId?: string | null
   workspaceId?: string | null
   workspacePath?: string | null
+  workdir?: string | null
   permission?: string | null
   cwd?: string | null
   blockedBy?: string[]
@@ -126,6 +129,7 @@ interface TaskUpdateInput {
   parentId?: string | null
   workspaceId?: string | null
   workspacePath?: string | null
+  workdir?: string | null
   permission?: string | null
   cwd?: string | null
   blockedBy?: string[]
