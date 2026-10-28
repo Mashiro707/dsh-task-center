@@ -1324,3 +1324,58 @@ test('re-check keeps the stage failed when the command still fails', async () =>
     await dispose()
   }
 })
+
+test('a task keeps one session from stage to stage', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '一个会话', workspacePath: workspace })
+
+    const first = await runner.start(task.id)
+    const sessionId = first.run.sessionId
+    const agent = host.agents.get(sessionId)
+    agent.status = 'idle'
+    host.emit('agent/status', { agent, status: 'idle' })
+    await waitFor(async () => {
+      const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+      return row.run?.status === 'running' ? null : row
+    })
+
+    const again = await runner.start(task.id)
+    assert.equal(again.run.sessionId, sessionId, 'the next run continues the same conversation')
+    assert.equal(host.created.length, 1, 'no second session was opened')
+    assert.equal(agent.inbox.length, 2, 'both prompts went to the one agent')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a session that is gone is replaced instead of reused', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '会话没了', workspacePath: workspace })
+
+    const first = await runner.start(task.id)
+    const agent = host.agents.get(first.run.sessionId)
+    agent.status = 'idle'
+    host.emit('agent/status', { agent, status: 'idle' })
+    await waitFor(async () => {
+      const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+      return row.run?.status === 'running' ? null : row
+    })
+    host.agents.delete(first.run.sessionId)
+
+    const again = await runner.start(task.id)
+    assert.notEqual(again.run.sessionId, first.run.sessionId, 'a new session was opened')
+    assert.equal(host.created.length, 2)
+  } finally {
+    await dispose()
+  }
+})

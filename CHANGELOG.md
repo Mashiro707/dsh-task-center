@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-10-28
+
+### Changed
+
+- A task now keeps one session across its stages: approving a stage, or a re-plan after a rejection, continues the same conversation instead of opening a new one. A session that is gone or busy is replaced.
+- Parallel work belongs to subagents the agent starts itself, not to extra sessions.
 ## [1.8.0] - 2026-10-27
 
 ### Added

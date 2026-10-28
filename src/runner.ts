@@ -1115,22 +1115,41 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     const carried = task.run !== null && (task.run.kind ?? 'execute') === mode.kind ? task.run.attempts : 0
     const attempt = carried + 1
 
-    // Exactly one of the two: the Host rejects a request naming both.
-    // A task that only carries a workspace path still needs that directory.
-    // An isolated worktree is a directory the workspace itself does not name, so
-    // the run is pointed at it directly even when a workspace id is on the task.
-    const created = workdir !== null
-      ? await controller.create({ cwd: workdir })
-      : await controller.create(workspaceId === '' ? { cwd: root } : { workspaceId })
+    // One session per task. Later stages continue the conversation the previous
+    // one started, so the agent still holds the plan and whatever it has already
+    // read; a session that is gone or busy is replaced rather than reused.
+    const previous = typeof task.run?.sessionId === 'string' ? task.run.sessionId.trim() : ''
+    let agent: HostAgent | null = null
+    if (previous !== '') {
+      const existing = await controller.resolveAgent(previous)
+      if (existing.agent !== undefined && existing.agent.status !== 'running') {
+        agent = existing.agent
+      }
+    }
 
-    // A cancel that landed while the session was being created wins: stop the
-    // session we just made instead of handing it a prompt it should not run.
+    if (agent === null) {
+      // Exactly one of the two: the Host rejects a request naming both.
+      // A task that only carries a workspace path still needs that directory.
+      // An isolated worktree is a directory the workspace itself does not name, so
+      // the run is pointed at it directly even when a workspace id is on the task.
+      const created = workdir !== null
+        ? await controller.create({ cwd: workdir })
+        : await controller.create(workspaceId === '' ? { cwd: root } : { workspaceId })
+      const resolved = await controller.resolveAgent(created.sessionId)
+      if (resolved.agent === undefined) {
+        throw runnerError('unavailable', `会话 ${created.sessionId} 建好后拿不到智能体：${describe(resolved.error)}`)
+      }
+      agent = resolved.agent
+    }
+
+    // A cancel that landed while the session was being prepared wins: stop the
+    // session instead of handing it a prompt it should not run.
     if (stopping.delete(task.id)) {
-      cancelSession(created.sessionId)
+      cancelSession(agent.id)
       return store.update({
         id: task.id,
         run: {
-          sessionId: created.sessionId,
+          sessionId: agent.id,
           status: 'failed' as TaskRunStatus,
           startedAt: Date.now(),
           endedAt: Date.now(),
@@ -1141,11 +1160,6 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       })
     }
 
-    const resolved = await controller.resolveAgent(created.sessionId)
-    if (resolved.agent === undefined) {
-      throw runnerError('unavailable', `会话 ${created.sessionId} 建好后拿不到智能体：${describe(resolved.error)}`)
-    }
-    const agent = resolved.agent
     const preset = (task.permission ?? '').trim()
     installPreset(agent, preset === '' ? config.preset : preset, task.autoApprove === true)
 
