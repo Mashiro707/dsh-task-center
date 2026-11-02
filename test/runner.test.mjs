@@ -1424,3 +1424,36 @@ test('a stage document can be checked without approving it', async () => {
     await dispose()
   }
 })
+
+test('a clean worktree is removed when the task finishes, a dirty one is kept', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { existsSync } = await import('node:fs')
+  const { writeFile } = await import('node:fs/promises')
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const repo = join(dir, 'repo')
+    await mkdir(repo, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: repo })
+    await writeFile(join(repo, 'a.txt'), 'one\n')
+    execFileSync('git', ['add', '.'], { cwd: repo })
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: repo })
+
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '隔离', workspacePath: repo })
+    const started = await runner.start(task.id)
+    const workdir = started.workdir
+    assert.ok(workdir !== null && existsSync(workdir), 'the run got its own worktree')
+
+    await writeFile(join(workdir, 'scratch.txt'), 'keep me\n')
+    await assert.rejects(() => runner.releaseWorktree(task.id), /没提交|未提交/)
+
+    const released = await runner.releaseWorktree(task.id, true)
+    assert.equal(released.released, true)
+    assert.equal(existsSync(workdir), false, 'the worktree is gone')
+    const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+    assert.equal(row.workdir, null)
+  } finally {
+    await dispose()
+  }
+})

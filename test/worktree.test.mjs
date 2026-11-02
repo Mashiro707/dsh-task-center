@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { WORKTREE_DIR, pickRepo, worktreeBranch, worktreePath } from '../worktree.js'
+import {
+  WORKTREE_DIR,
+  pickRepo,
+  removeWorktreeCommands,
+  worktreeBranch,
+  worktreeIsDirty,
+  worktreePath,
+} from '../worktree.js'
 
 test('a task gets a branch of its own', () => {
   assert.equal(worktreeBranch('t_abc12345_9f8e7d6c'), 'task-center/t_abc12345_9f8e7d6c')
@@ -34,4 +41,18 @@ test('the stage scope decides between several repositories', () => {
 test('no scope and no single repository means no decision', () => {
   assert.equal(pickRepo(['/w/a', '/w/b'], ['x.go'], () => false), null)
   assert.equal(pickRepo([], ['x.go'], () => false), null)
+})
+
+test('cleanup removes the worktree first and the branch after', () => {
+  const commands = removeWorktreeCommands('C:/repo/.worktrees/t_1', 'task-center/t_1')
+  assert.equal(commands[0], 'git worktree remove --force "C:/repo/.worktrees/t_1"')
+  assert.equal(commands[1], 'git branch -D "task-center/t_1"')
+  assert.equal(commands[2], 'git worktree prune')
+})
+
+test('only real output counts as uncommitted work', () => {
+  assert.equal(worktreeIsDirty(''), false)
+  assert.equal(worktreeIsDirty('  \n'), false)
+  assert.equal(worktreeIsDirty(' M a.txt\n'), true)
+  assert.equal(worktreeIsDirty('?? scratch.txt'), true)
 })

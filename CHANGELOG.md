@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-11-02
+
+### Added
+
+- A task now cleans up its worktree: when the last stage is approved and verified, `git worktree remove --force`, `git branch -D` and `git worktree prune` run and `workdir` is cleared.
+- A worktree with uncommitted changes is kept, never silently discarded; the task row keeps pointing at it.
+- Permanently deleting a task removes its worktree and branch regardless of uncommitted work.
+- New `releaseWorktree` route for cleaning up by hand (`force: true` drops uncommitted work too).
 ## [1.10.0] - 2026-11-02
 
 ### Added

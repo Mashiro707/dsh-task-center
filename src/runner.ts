@@ -16,7 +16,7 @@ import type { RemoteTarget } from './remote.js'
 import { checkVerifyCommands } from './stage-doc.js'
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js'
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js'
-import { pickRepo, worktreeBranch, worktreePath } from './worktree.js'
+import { pickRepo, removeWorktreeCommands, worktreeBranch, worktreeIsDirty, worktreePath } from './worktree.js'
 import type { VerifyOutcome } from './verify.js'
 
 /** How many runs may be alive at once when the caller asks for no particular cap. */
@@ -98,6 +98,7 @@ export interface TaskRunner {
    */
   approveStage(taskId: string, ordinal?: number): Promise<TaskRecord>
   inspectStage(taskId: string, ordinal?: number): Promise<StageDocCheck>
+  releaseWorktree(taskId: string, force?: boolean): Promise<{ released: boolean; reason?: string }>
   /**
    * Send a stage document back to planning with a note.
    * @param {string} taskId - the task owning the stage.
@@ -939,6 +940,33 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
    * @param {string} output - the verification output to keep.
    * @returns {Promise<void>} resolves once the board is updated.
    */
+  async function releaseTaskWorktree(taskId: string, force = false): Promise<{ released: boolean; reason?: string }> {
+      const board = await store.list()
+      const task = board.tasks.find(entry => entry.id === taskId)
+      if (task === undefined) throw runnerError('not-found', `找不到任务 ${taskId}。`)
+      const dir = (task.workdir ?? '').trim()
+      if (dir === '') return { released: false, reason: '这个任务没有独立的工作目录。' }
+      if (!force) {
+        const status = await shellIn(task, dir, 'git status --porcelain')
+        if (status.ok && worktreeIsDirty(status.output)) {
+          throw runnerError(
+            'worktree-dirty',
+            '这个工作目录里还有没提交的改动，确认不要了再强制清理。',
+          )
+        }
+      }
+      const flat = dir.split(String.fromCharCode(92)).join('/')
+      const cut = flat.lastIndexOf('/.worktrees/')
+      const repoRoot = cut === -1 ? dir : flat.slice(0, cut)
+      for (const command of removeWorktreeCommands(dir, worktreeBranch(taskId))) {
+        const outcome = await shellIn(task, repoRoot === dir ? dir : repoRoot, command)
+        if (!outcome.ok) note(`worktree cleanup: ${command} -> ${outcome.output.slice(0, 120)}`)
+      }
+      await store.update({ id: taskId, workdir: null })
+      note(`worktree released for ${taskId}`)
+      return { released: true }
+  }
+
   async function advanceStage(task: TaskRecord, stage: TaskStage, output: string): Promise<void> {
     const board = await store.list()
     const current = board.tasks.find(entry => entry.id === task.id)
@@ -961,6 +989,9 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       ...(finished ? { status: 'done' as TaskStatus } : {}),
     })
     note(`stage ${stage.index} done`)
+    if (finished && (current.workdir ?? "") !== "") {
+      void releaseTaskWorktree(current.id).catch(error => note(`worktree kept: ${describe(error)}`))
+    }
     if (!finished) ctx.logger?.info?.(`[task-center] 阶段 ${stage.index} 验收通过，下一步等批准。`)
   }
 
@@ -1643,6 +1674,16 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         return approved
       }
       return start(taskId)
+    },
+
+    /**
+     * Throw away a task's worktree once its work is merged or abandoned.
+     * @param {string} taskId - the task.
+     * @param {boolean} [force] - remove even when the copy has uncommitted work.
+     * @returns {Promise<{released: boolean, reason?: string}>} what happened.
+     */
+    async releaseWorktree(taskId: string, force = false): Promise<{ released: boolean; reason?: string }> {
+      return releaseTaskWorktree(taskId, force)
     },
 
     /**

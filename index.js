@@ -1232,6 +1232,15 @@ export function apply(ctx) {
      * @returns {Promise<{ removed: number }>} how many rows went away.
      */
     async function dropTask(input) {
+        const id = typeof input.id === "string" ? input.id : "";
+        if (id !== "") {
+            try {
+                await runner.releaseWorktree(id, true);
+            }
+            catch (error) {
+                ctx.logger?.warn?.(`[task-center] 清理工作目录失败：${describeError(error)}`);
+            }
+        }
         const removed = await watched.remove(input);
         if (input.permanent !== true)
             return removed;
@@ -1304,6 +1313,7 @@ export function apply(ctx) {
         rejectStage: input => runner.rejectStage(requireId(input), optionalOrdinal(input), typeof input.feedback === 'string' ? input.feedback : undefined),
         stageDoc: input => runner.stageDoc(requireId(input), optionalOrdinal(input)),
         checkStage: input => runner.inspectStage(requireId(input), optionalOrdinal(input)),
+        releaseWorktree: input => runner.releaseWorktree(requireId(input), input.force === true),
         settings: async () => {
             if (toolSetupError !== null && toolSetup !== null)
                 toolSetup();

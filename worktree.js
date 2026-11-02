@@ -50,3 +50,28 @@ export function pickRepo(candidates, scope, exists) {
     }
     return best;
 }
+/**
+ * Commands that fold a task's worktree back into nothing.
+ *
+ * `git worktree remove --force` is used because a review copy may hold
+ * generated files; the branch is deleted only after the directory is gone, so a
+ * failed removal never leaves a dangling branch behind.
+ * @param {string} dir - absolute path of the worktree.
+ * @param {string} branch - branch the worktree was checked out on.
+ * @returns {string[]} shell commands to run in the repository root.
+ */
+export function removeWorktreeCommands(dir, branch) {
+    return [
+        `git worktree remove --force ${JSON.stringify(dir)}`,
+        `git branch -D ${JSON.stringify(branch)}`,
+        'git worktree prune',
+    ];
+}
+/**
+ * Does this stage document still have uncommitted work in its worktree?
+ * @param {string} statusOutput - `git status --porcelain` output.
+ * @returns {boolean} true when there is anything to lose.
+ */
+export function worktreeIsDirty(statusOutput) {
+    return statusOutput.trim() !== '';
+}

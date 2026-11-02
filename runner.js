@@ -15,7 +15,7 @@ import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './
 import { checkVerifyCommands } from './stage-doc.js';
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js';
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js';
-import { pickRepo, worktreeBranch, worktreePath } from './worktree.js';
+import { pickRepo, removeWorktreeCommands, worktreeBranch, worktreeIsDirty, worktreePath } from './worktree.js';
 /** How many runs may be alive at once when the caller asks for no particular cap. */
 const MAX_CONCURRENCY = 4;
 /** Preset that reviews each call before it runs; the closest thing to unattended. */
@@ -791,6 +791,32 @@ export function createRunner(ctx, store) {
      * @param {string} output - the verification output to keep.
      * @returns {Promise<void>} resolves once the board is updated.
      */
+    async function releaseTaskWorktree(taskId, force = false) {
+        const board = await store.list();
+        const task = board.tasks.find(entry => entry.id === taskId);
+        if (task === undefined)
+            throw runnerError('not-found', `找不到任务 ${taskId}。`);
+        const dir = (task.workdir ?? '').trim();
+        if (dir === '')
+            return { released: false, reason: '这个任务没有独立的工作目录。' };
+        if (!force) {
+            const status = await shellIn(task, dir, 'git status --porcelain');
+            if (status.ok && worktreeIsDirty(status.output)) {
+                throw runnerError('worktree-dirty', '这个工作目录里还有没提交的改动，确认不要了再强制清理。');
+            }
+        }
+        const flat = dir.split(String.fromCharCode(92)).join('/');
+        const cut = flat.lastIndexOf('/.worktrees/');
+        const repoRoot = cut === -1 ? dir : flat.slice(0, cut);
+        for (const command of removeWorktreeCommands(dir, worktreeBranch(taskId))) {
+            const outcome = await shellIn(task, repoRoot === dir ? dir : repoRoot, command);
+            if (!outcome.ok)
+                note(`worktree cleanup: ${command} -> ${outcome.output.slice(0, 120)}`);
+        }
+        await store.update({ id: taskId, workdir: null });
+        note(`worktree released for ${taskId}`);
+        return { released: true };
+    }
     async function advanceStage(task, stage, output) {
         const board = await store.list();
         const current = board.tasks.find(entry => entry.id === task.id);
@@ -814,6 +840,9 @@ export function createRunner(ctx, store) {
             ...(finished ? { status: 'done' } : {}),
         });
         note(`stage ${stage.index} done`);
+        if (finished && (current.workdir ?? "") !== "") {
+            void releaseTaskWorktree(current.id).catch(error => note(`worktree kept: ${describe(error)}`));
+        }
         if (!finished)
             ctx.logger?.info?.(`[task-center] 阶段 ${stage.index} 验收通过，下一步等批准。`);
     }
@@ -1515,6 +1544,15 @@ export function createRunner(ctx, store) {
                 return approved;
             }
             return start(taskId);
+        },
+        /**
+         * Throw away a task's worktree once its work is merged or abandoned.
+         * @param {string} taskId - the task.
+         * @param {boolean} [force] - remove even when the copy has uncommitted work.
+         * @returns {Promise<{released: boolean, reason?: string}>} what happened.
+         */
+        async releaseWorktree(taskId, force = false) {
+            return releaseTaskWorktree(taskId, force);
         },
         /**
          * Check a stage document without approving it.
