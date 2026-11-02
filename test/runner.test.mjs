@@ -1379,3 +1379,48 @@ test('a session that is gone is replaced instead of reused', async () => {
     await dispose()
   }
 })
+
+test('approving a document whose verify commands cannot work is refused', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(join(workspace, 'repo'), { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '坏文档', workspacePath: workspace })
+    await planOneStage(store, task, workspace, {
+      status: 'awaiting-approval',
+      verify: ['cd repo && ! grep -q TODO repo/main.go'],
+    })
+
+    await assert.rejects(() => runner.approveStage(task.id), /验收命令有问题/)
+    const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+    assert.equal(row.stages[0].status, 'awaiting-approval', 'the stage stays where the user can reject it')
+    assert.match(String(row.stages[0].message), /验收命令有问题/)
+    assert.equal(host.created.length, 0, 'no agent was started for a document we do not trust')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a stage document can be checked without approving it', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(join(workspace, 'repo'), { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '先检查', workspacePath: workspace })
+    await planOneStage(store, task, workspace, {
+      status: 'awaiting-approval',
+      verify: ['cd repo && go build ./...', 'frobnicate --check'],
+    })
+
+    const check = await runner.inspectStage(task.id)
+    assert.deepEqual(check.errors, [])
+    assert.ok(check.warnings.some(entry => /frobnicate/.test(entry)))
+    assert.equal(check.commands.length, 2)
+  } finally {
+    await dispose()
+  }
+})

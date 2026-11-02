@@ -71,6 +71,8 @@ window.__ModuleLoader__.load({
                 stageFailed: '失败',
                 stageReason: '失败原因',
                 approve: '批准',
+                checkDoc: '检查文档',
+                checkOk: '验收命令看起来没问题',
                 reject: '驳回',
                 rejectWhy: '为什么不接受这份文档？这段说明会写进重新规划的提示词。',
                 rejectConfirm: '确认驳回',
@@ -209,6 +211,8 @@ window.__ModuleLoader__.load({
                 stageFailed: 'Failed',
                 stageReason: 'Why it failed',
                 approve: 'Approve',
+                checkDoc: 'Check doc',
+                checkOk: 'The verify commands look fine',
                 reject: 'Reject',
                 rejectWhy: 'Why is this document not acceptable? The text is handed to the planning agent.',
                 rejectConfirm: 'Reject it',
@@ -1163,6 +1167,14 @@ window.__ModuleLoader__.load({
                             className: 'tc-btn tc-btn-primary',
                             onClick: () => act('approveStage', index + 1),
                         }, t('approve'))
+                        : null, awaiting
+                        ? h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-quiet',
+                            onClick: () => {
+                                void props.onStageCheck(task.id, index + 1);
+                            },
+                        }, t('checkDoc'))
                         : null, entry.status === 'failed'
                         ? h('button', {
                             type: 'button',
@@ -1584,6 +1596,22 @@ window.__ModuleLoader__.load({
                     setNotice({ kind: 'ok', text: t('noticeCanceled') });
             };
             /** Approve or reject the document of one stage, then re-read the board. */
+            const stageCheck = async (id, ordinal) => {
+                try {
+                    const check = await call('checkStage', { id, ordinal });
+                    const errors = check !== null && Array.isArray(check.errors) ? check.errors : [];
+                    const warnings = check !== null && Array.isArray(check.warnings) ? check.warnings : [];
+                    if (errors.length > 0)
+                        setNotice({ kind: 'error', text: String(errors[0]) });
+                    else if (warnings.length > 0)
+                        setNotice({ kind: 'ok', text: String(warnings[0]) });
+                    else
+                        setNotice({ kind: 'ok', text: t('checkOk') });
+                }
+                catch (error) {
+                    setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) });
+                }
+            };
             const stageAction = async (id, ordinal, action, feedback) => {
                 try {
                     const payload = { id, ordinal };
@@ -1795,6 +1823,7 @@ window.__ModuleLoader__.load({
                     },
                     onOpenTask: (id) => setOpenId(id),
                     onStageAction: stageAction,
+                    onStageCheck: stageCheck,
                     onStageDoc: stageDoc,
                     onDelete: deleteTask,
                 }), notice === null

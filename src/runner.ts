@@ -13,6 +13,7 @@ import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promis
 import { dirname, isAbsolute, join } from 'node:path'
 import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js'
 import type { RemoteTarget } from './remote.js'
+import { checkVerifyCommands } from './stage-doc.js'
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js'
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js'
 import { pickRepo, worktreeBranch, worktreePath } from './worktree.js'
@@ -69,6 +70,13 @@ export interface RunnerQueueState {
 }
 
 /** The runner surface handed back to `apply`. */
+/** Errors and warnings for one stage document. */
+export interface StageDocCheck {
+  errors: string[]
+  warnings: string[]
+  commands: string[]
+}
+
 export interface TaskRunner {
   /**
    * Run the task now, or park it in the queue when every slot is taken.
@@ -89,6 +97,7 @@ export interface TaskRunner {
    * @returns {Promise<TaskRecord>} the task, now running that stage.
    */
   approveStage(taskId: string, ordinal?: number): Promise<TaskRecord>
+  inspectStage(taskId: string, ordinal?: number): Promise<StageDocCheck>
   /**
    * Send a stage document back to planning with a note.
    * @param {string} taskId - the task owning the stage.
@@ -1616,6 +1625,13 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       if (stage.status !== 'awaiting-approval' && stage.status !== 'failed') {
         throw runnerError('not-awaiting', `阶段 ${stage.index} 现在是 ${stage.status}，不用批准。`)
       }
+      const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined)
+      if (check.errors.length > 0) {
+        await patchStage(taskId, stage.index, {
+          message: `验收命令有问题：${check.errors.join('；')}`,
+        })
+        throw runnerError('stage-doc-invalid', `验收命令有问题：${check.errors.join('；')}`)
+      }
       const stages = task.stages.map((entry, index) =>
         index === position ? { ...entry, status: 'approved' as TaskStageStatus, message: null } : entry,
       )
@@ -1627,6 +1643,23 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         return approved
       }
       return start(taskId)
+    },
+
+    /**
+     * Check a stage document without approving it.
+     * @param {string} taskId - the task.
+     * @param {number} [ordinal] - 1-based stage number, defaults to the current one.
+     * @returns {Promise<StageDocCheck>} errors and warnings.
+     */
+    async inspectStage(taskId: string, ordinal?: number): Promise<StageDocCheck> {
+      const board = await store.list()
+      const task = board.tasks.find(entry => entry.id === taskId)
+      if (task === undefined) throw runnerError('not-found', `找不到任务 ${taskId}。`)
+      const position = ordinal === undefined ? (task.stageIndex < 0 ? 0 : task.stageIndex) : ordinal - 1
+      const stage = task.stages[position]
+      if (stage === undefined) throw runnerError('no-stage', `任务没有第 ${position + 1} 个阶段。`)
+      const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined)
+      return { errors: check.errors, warnings: check.warnings, commands: stage.verify }
     },
 
     async reverify(taskId: string): Promise<TaskRecord> {

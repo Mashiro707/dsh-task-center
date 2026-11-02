@@ -1303,6 +1303,7 @@ export function apply(ctx) {
         reverify: input => runner.reverify(requireId(input)),
         rejectStage: input => runner.rejectStage(requireId(input), optionalOrdinal(input), typeof input.feedback === 'string' ? input.feedback : undefined),
         stageDoc: input => runner.stageDoc(requireId(input), optionalOrdinal(input)),
+        checkStage: input => runner.inspectStage(requireId(input), optionalOrdinal(input)),
         settings: async () => {
             if (toolSetupError !== null && toolSetup !== null)
                 toolSetup();

@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js';
+import { checkVerifyCommands } from './stage-doc.js';
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js';
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js';
 import { pickRepo, worktreeBranch, worktreePath } from './worktree.js';
@@ -1498,6 +1499,13 @@ export function createRunner(ctx, store) {
             if (stage.status !== 'awaiting-approval' && stage.status !== 'failed') {
                 throw runnerError('not-awaiting', `阶段 ${stage.index} 现在是 ${stage.status}，不用批准。`);
             }
+            const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined);
+            if (check.errors.length > 0) {
+                await patchStage(taskId, stage.index, {
+                    message: `验收命令有问题：${check.errors.join('；')}`,
+                });
+                throw runnerError('stage-doc-invalid', `验收命令有问题：${check.errors.join('；')}`);
+            }
             const stages = task.stages.map((entry, index) => index === position ? { ...entry, status: 'approved', message: null } : entry);
             const approved = await store.update({ id: taskId, stages, stageIndex: position });
             note(`stage ${stage.index} approved`);
@@ -1507,6 +1515,24 @@ export function createRunner(ctx, store) {
                 return approved;
             }
             return start(taskId);
+        },
+        /**
+         * Check a stage document without approving it.
+         * @param {string} taskId - the task.
+         * @param {number} [ordinal] - 1-based stage number, defaults to the current one.
+         * @returns {Promise<StageDocCheck>} errors and warnings.
+         */
+        async inspectStage(taskId, ordinal) {
+            const board = await store.list();
+            const task = board.tasks.find(entry => entry.id === taskId);
+            if (task === undefined)
+                throw runnerError('not-found', `找不到任务 ${taskId}。`);
+            const position = ordinal === undefined ? (task.stageIndex < 0 ? 0 : task.stageIndex) : ordinal - 1;
+            const stage = task.stages[position];
+            if (stage === undefined)
+                throw runnerError('no-stage', `任务没有第 ${position + 1} 个阶段。`);
+            const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined);
+            return { errors: check.errors, warnings: check.warnings, commands: stage.verify };
         },
         async reverify(taskId) {
             const board = await store.list();

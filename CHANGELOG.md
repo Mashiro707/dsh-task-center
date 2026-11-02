@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-11-02
+
+### Added
+
+- Stage documents are checked before they are trusted: a `verify` command whose `cd` target does not exist, a `cd X && ... X/...` self-contradiction, destructive commands (`sudo`, `rm -rf /`, `curl | sh`, fork bombs) are refused at approval time, and the stage stays `awaiting-approval` with the reason in its message.
+- Uncommon commands are reported as warnings rather than errors, so a project with its own toolchain still works.
+- New `checkStage` route and a 「检查文档」button in the drawer to preview errors and warnings without approving.
 ## [1.9.0] - 2026-10-28
 
 ### Changed
