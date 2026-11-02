@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-11-02
+
+### Added
+
+- Every card now carries a conversation button: it opens the session the task is running in through the shell (`uiWorkspace.openSession`), and copies the session id when this window has no such service.
+- A stage that starts waiting for approval marks the window title with the count and raises a desktop notification (once per stage) when permission is already granted; the panel re-reads the board every 20 seconds while it is open.
 ## [1.11.0] - 2026-11-02
 
 ### Added

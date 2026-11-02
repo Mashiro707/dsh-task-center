@@ -268,3 +268,19 @@ test('the card order survives numeric timestamps', () => {
   const withDue = { due: '2026-01-01', priority: 'normal', createdAt: 5000 }
   assert.equal(bySchedule(withDue, older) < 0, true, 'a due task outranks an undated one')
 })
+
+test('a card can open the conversation the task runs in', () => {
+  const text = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(text, /\.tc-sessionbtn\{/, 'the card carries a conversation button')
+  assert.match(text, /function openConversation/, 'the shell navigation is one helper')
+  assert.match(text, /get\(.uiWorkspace.\)/, 'it goes through the shell workspace service')
+  assert.match(text, /service\.openSession\(sessionId\)/, 'and asks the shell to show the session')
+  assert.match(text, /navigator\.clipboard\.writeText\(sessionId\)/, 'falling back to the clipboard')
+})
+
+test('a stage that starts waiting for approval is announced', () => {
+  const text = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(text, /Notification\.permission !== .granted./, 'the desktop notification is guarded')
+  assert.match(text, /document\.title = waiting > 0/, 'the window title carries the count too')
+  assert.match(text, /\}, 20000\)/, 'the panel re-reads the board while it is open')
+})

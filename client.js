@@ -84,6 +84,8 @@ window.__ModuleLoader__.load({
                 hideDoc: '收起文档',
                 docEmpty: '文档还没生成。',
                 awaitBadge: '待批准',
+                openSession: '打开这个任务的会话',
+                openSessionFailed: '打不开会话（这个窗口可能没有工作区服务），会话 id 已复制到剪贴板。',
                 noticeApproved: '已批准，开跑就会按文档执行。',
                 noticeRejected: '已驳回，这一阶段会重新规划。',
                 tagsPlaceholder: '用逗号分隔',
@@ -224,6 +226,8 @@ window.__ModuleLoader__.load({
                 hideDoc: 'Hide document',
                 docEmpty: 'No document yet.',
                 awaitBadge: 'Awaiting approval',
+                openSession: "Open this task's conversation",
+                openSessionFailed: 'Could not open the conversation here; its id was copied instead.',
                 noticeApproved: 'Approved — the next run follows the document.',
                 noticeRejected: 'Rejected — this stage will be planned again.',
                 tagsPlaceholder: 'Comma separated',
@@ -502,6 +506,15 @@ window.__ModuleLoader__.load({
         function StopIcon() {
             return h('svg', { viewBox: '0 0 24 24', width: 10, height: 10, 'aria-hidden': true, className: 'tc-stop-icon' }, h('rect', { x: 6, y: 6, width: 12, height: 12, rx: 2.2, fill: 'currentColor' }));
         }
+        function ChatIcon() {
+            return h('svg', { viewBox: '0 0 24 24', width: 11, height: 11, 'aria-hidden': true, className: 'tc-chat-icon' }, h('path', {
+                d: 'M4 5.5h16v10H9.2L4.6 19v-3.5H4z',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 2,
+                strokeLinejoin: 'round',
+            }));
+        }
         function PanelIcon(props) {
             const size = typeof props.size === 'number' && props.size > 0 ? props.size : 20;
             return h('svg', {
@@ -775,6 +788,7 @@ window.__ModuleLoader__.load({
             const queued = run !== null && run.status === 'queued';
             const failed = run !== null && run.status === 'failed';
             const canRun = !running && !queued && task.status !== 'done';
+            const sessionId = run === null || typeof run.sessionId !== 'string' ? '' : run.sessionId;
             const hasMeta = task.due !== null ||
                 task.tags.length > 0 ||
                 subtasks.length > 0 ||
@@ -863,7 +877,18 @@ window.__ModuleLoader__.load({
                                 props.onRun(task.id);
                             },
                         }, h(PlayIcon))
-                        : null), stages.length > 0 && task.status !== 'done'
+                        : null, sessionId === ''
+                ? null
+                : h('button', {
+                    type: 'button',
+                    className: 'tc-sessionbtn',
+                    title: t('openSession'),
+                    'aria-label': t('openSession'),
+                    onClick: (event) => {
+                        event.stopPropagation();
+                        props.onOpenSession(sessionId);
+                    },
+                }, h(ChatIcon))), stages.length > 0 && task.status !== 'done'
                 ? h('div', { className: 'tc-stagebar' + (stageAwaiting ? ' tc-stagebar-await' : '') }, h('span', { className: 'tc-stagebar-dots' }, stages.map((entry, index) => h('span', {
                     key: String(index),
                     className: 'tc-sdot tc-sdot-' +
@@ -917,6 +942,7 @@ window.__ModuleLoader__.load({
                     onToggle: props.onToggle,
                     onRun: props.onRun,
                     onCancelRun: props.onCancelRun,
+                    onOpenSession: props.onOpenSession,
                     onDragStart: props.onDragStart,
                     onDragEnd: props.onDragEnd,
                 }))));
@@ -1387,6 +1413,16 @@ window.__ModuleLoader__.load({
             React.useEffect(() => {
                 void refresh();
             }, [refresh]);
+            // A stage that starts waiting for approval is the one thing you cannot see
+            // from another window, so poll while the panel is mounted and tell the
+            // desktop once per stage.
+            const notified = React.useRef({});
+            React.useEffect(() => {
+                const timer = window.setInterval(() => {
+                    void refresh();
+                }, 20000);
+                return () => window.clearInterval(timer);
+            }, [refresh]);
             // Keep the quick-add target pointing at a workspace that still exists.
             React.useEffect(() => {
                 if (workspaces.length === 0)
@@ -1413,6 +1449,42 @@ window.__ModuleLoader__.load({
                 }
             }, [refresh]);
             const tasks = board !== null && Array.isArray(board.tasks) ? board.tasks : [];
+            React.useEffect(() => {
+                let waiting = 0;
+                const fresh = [];
+                for (const task of tasks) {
+                    if (task.deletedAt !== null || task.status === 'done')
+                        continue;
+                    const stages = Array.isArray(task.stages) ? task.stages : [];
+                    const index = typeof task.stageIndex === 'number' ? task.stageIndex : 0;
+                    const stage = stages.length === 0 ? null : stages[Math.min(index, stages.length - 1)];
+                    if (stage === null || stage.status !== 'awaiting-approval')
+                        continue;
+                    waiting += 1;
+                    const key = task.id + ':' + String(index);
+                    if (notified.current[key] === true)
+                        continue;
+                    notified.current[key] = true;
+                    fresh.push(task);
+                }
+                try {
+                    document.title = waiting > 0 ? '⚠ ' + String(waiting) + ' · ' + t('nav') : t('nav');
+                }
+                catch (error) {
+                    // A title is not worth a crash.
+                }
+                if (fresh.length === 0)
+                    return;
+                try {
+                    if (typeof Notification !== 'function' || Notification.permission !== 'granted')
+                        return;
+                    for (const task of fresh)
+                        new Notification(t('awaitBadge'), { body: task.title });
+                }
+                catch (error) {
+                    // Notifications are best effort.
+                }
+            }, [tasks, t]);
             const trash = board !== null && Array.isArray(board.trash) ? board.trash : [];
             const queuedCount = React.useMemo(() => {
                 let total = 0;
@@ -1590,6 +1662,12 @@ window.__ModuleLoader__.load({
                     setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) });
                 }
             };
+            /** Show the conversation this task is running in. */
+            const openTaskSession = (sessionId) => {
+                if (!openConversation(sessionId)) {
+                    setNotice({ kind: 'error', text: t('openSessionFailed') });
+                }
+            };
             const stopRun = async (id) => {
                 const ok = await mutate('cancelRun', { id });
                 if (ok)
@@ -1703,6 +1781,7 @@ window.__ModuleLoader__.load({
                         onToggle: toggleTask,
                         onRun: startRun,
                         onCancelRun: stopRun,
+                        onOpenSession: openTaskSession,
                         onDragStart: setDragId,
                         onDragEnd: () => {
                             setDragId('');
@@ -1970,6 +2049,9 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-card:hover .tc-runbtn,.tc-card:focus-within .tc-runbtn,.tc-runbtn:focus-visible{opacity:1}
 .tc-runbtn:hover{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-base)}
 .tc-runbtn-failed{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 42%,var(--dsw-alias-border-l1));opacity:1}
+.tc-sessionbtn{flex:0 0 auto;margin-left:6px;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;appearance:none;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;transition:opacity .12s ease,color .12s ease,border-color .12s ease}
+.tc-card:hover .tc-sessionbtn,.tc-card:focus-within .tc-sessionbtn,.tc-sessionbtn:focus-visible{opacity:1}
+.tc-sessionbtn:hover{color:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
 .tc-runpill{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:1px 6px 1px 7px;appearance:none;border-radius:999px;border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 36%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);color:var(--dsw-alias-brand-primary);font:inherit;font-size:12px;line-height:1.6;cursor:pointer;font-variant-numeric:tabular-nums;transition:background .12s ease}
 .tc-runpill:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 20%,transparent)}
 .tc-run-dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary);animation:tc-pulse 1.4s ease-in-out infinite}
@@ -2151,8 +2233,39 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
                 reportClientError('rejection', (event && event.reason) || 'unknown', '');
             });
         }
+        // The Client half is handed its own context in `apply`, which is where the
+        // shell services live; the components below reach them through this one.
+        let clientCtx = null;
+        /**
+         * Show a task's conversation in the shell. Falls back to the clipboard when
+         * this window has no workspace service to navigate with.
+         * @param {string} sessionId - the run's session.
+         * @returns {boolean} whether the shell took the navigation.
+         */
+        function openConversation(sessionId) {
+            if (typeof sessionId !== 'string' || sessionId === '')
+                return false;
+            try {
+                const service = clientCtx === null ? undefined : clientCtx.get('uiWorkspace');
+                if (service !== undefined && service !== null && typeof service.openSession === 'function') {
+                    service.openSession(sessionId);
+                    return true;
+                }
+            }
+            catch (error) {
+                // Fall through to the clipboard.
+            }
+            try {
+                void navigator.clipboard.writeText(sessionId);
+            }
+            catch (error) {
+                // Nothing else to do.
+            }
+            return false;
+        }
         // -------------------------------------------------------------- lifecycle
         function apply(ctx) {
+            clientCtx = ctx;
             let bound = null;
             try {
                 ctx.locale.register(NS, DICT);
