@@ -1457,3 +1457,96 @@ test('a clean worktree is removed when the task finishes, a dirty one is kept', 
     await dispose()
   }
 })
+
+async function runAndSettle(host, runner, store, taskId) {
+  const row = await runner.start(taskId)
+  const agent = host.agents.get(row.run.sessionId)
+  agent.status = 'idle'
+  host.emit('agent/status', { agent, status: 'idle' })
+  let last = null
+  try {
+    await waitFor(async () => {
+      const current = (await store.list()).tasks.find(entry => entry.id === taskId)
+      last = current
+      return current?.run?.status === 'running' ? null : current
+    })
+  } catch (error) {
+    console.error('DEBUGC last run', JSON.stringify(last?.run), 'agent', agent.id, agent.status)
+    throw error
+  }
+  return row
+}
+
+function seedAgent(host, id) {
+  const agent = {
+    id,
+    session: { id },
+    status: 'idle',
+    inbox: [],
+    followup(message) {
+      this.inbox.push(message)
+      this.status = 'running'
+    },
+  }
+  host.agents.set(id, agent)
+  return agent
+}
+
+async function seedFinishedRun(store, taskId, sessionId, sessionRuns) {
+  await store.update({
+    id: taskId,
+    run: {
+      sessionId,
+      status: 'done',
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      message: null,
+      attempts: 1,
+      kind: 'plan',
+      sessionRuns,
+    },
+  })
+}
+
+test('a reused session counts the runs that share it', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '数轮次', workspacePath: workspace })
+    const agent = seedAgent(host, 'session-9')
+    await seedFinishedRun(store, task.id, 'session-9', 3)
+
+    const row = await runner.start(task.id)
+
+    assert.equal(host.created.length, 0, 'the existing session is reused')
+    assert.equal(row.run.sessionId, 'session-9')
+    assert.equal(row.run.sessionRuns, 4, 'the run counts on the session it joined')
+    assert.match(agent.inbox[0].content[0].text, /第 4 轮/, 'the prompt says which round this is')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a task opens a new session once the conversation is long', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '会话过长', workspacePath: workspace })
+    seedAgent(host, 'session-9')
+    await seedFinishedRun(store, task.id, 'session-9', 6)
+
+    const row = await runner.start(task.id)
+
+    assert.equal(host.created.length, 1, 'a fresh conversation is opened')
+    assert.equal(row.run.sessionRuns, 1, 'and the count starts over')
+    assert.notEqual(row.run.sessionId, 'session-9')
+  } finally {
+    await dispose()
+  }
+})

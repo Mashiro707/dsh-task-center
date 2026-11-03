@@ -230,6 +230,9 @@ function normalizeRun(raw) {
         : 'failed';
     const attempts = Number.isFinite(source.attempts) && source.attempts > 0 ? Math.trunc(source.attempts) : status === 'queued' ? 0 : 1;
     const kind = source.kind === 'plan' || source.kind === 'execute' ? source.kind : undefined;
+    const sessionRuns = Number.isFinite(source.sessionRuns) && source.sessionRuns > 0
+        ? Math.trunc(source.sessionRuns)
+        : undefined;
     return {
         sessionId: typeof source.sessionId === 'string' && source.sessionId !== '' ? source.sessionId : null,
         status,
@@ -238,6 +241,7 @@ function normalizeRun(raw) {
         message: typeof source.message === 'string' && source.message !== '' ? source.message : null,
         attempts,
         ...(kind === undefined ? {} : { kind }),
+        ...(sessionRuns === undefined ? {} : { sessionRuns }),
     };
 }
 /**

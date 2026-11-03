@@ -22,6 +22,14 @@ import type { VerifyOutcome } from './verify.js'
 /** How many runs may be alive at once when the caller asks for no particular cap. */
 const MAX_CONCURRENCY = 4
 
+/**
+ * How many runs may share one session before a fresh one is opened. A task that
+ * keeps thinking in the same conversation gets long; past this point the agent
+ * starts from the stage documents and the code instead of the whole history.
+ * @type {number}
+ */
+const MAX_SESSION_RUNS = 6
+
 /** Preset that reviews each call before it runs; the closest thing to unattended. */
 const DEFAULT_PRESET = 'auto'
 
@@ -1160,12 +1168,17 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     // read; a session that is gone or busy is replaced rather than reused.
     const previous = typeof task.run?.sessionId === 'string' ? task.run.sessionId.trim() : ''
     let agent: HostAgent | null = null
-    if (previous !== '') {
+    const carriedRuns =
+      typeof task.run?.sessionRuns === 'number' && Number.isFinite(task.run.sessionRuns) && task.run.sessionRuns > 0
+        ? Math.trunc(task.run.sessionRuns)
+        : 1
+    if (previous !== '' && carriedRuns < MAX_SESSION_RUNS) {
       const existing = await controller.resolveAgent(previous)
       if (existing.agent !== undefined && existing.agent.status !== 'running') {
         agent = existing.agent
       }
     }
+    const sessionRuns = agent !== null ? carriedRuns + 1 : 1
 
     if (agent === null) {
       // Exactly one of the two: the Host rejects a request naming both.
@@ -1195,6 +1208,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
           endedAt: Date.now(),
           message: '已取消',
           attempts: attempt,
+          sessionRuns: 1,
           kind: mode.kind,
         },
       })
@@ -1218,6 +1232,12 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       sessionToTask.delete(agent.id)
       taskToSession.delete(task.id)
       throw runnerError('doc-missing', `读不到阶段文档 ${mode.stage.docPath}：${describe(error)}`)
+    }
+    if (sessionRuns > 1) {
+      // Same conversation, so say so: the agent already knows the earlier stages.
+      prompt += `
+
+（这是同一个会话的第 ${sessionRuns} 轮：前面阶段的改动已经在工作目录里，动手前先看一眼 git status 和当前阶段的文档，别把做过的事再做一遍。）`
     }
     await patchStage(task.id, mode.stage.index, { status: 'running', startedAt: Date.now() })
     try {
@@ -1247,6 +1267,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         endedAt: null,
         message: null,
         attempts: attempt,
+        sessionRuns,
         kind: mode.kind,
       },
     })
@@ -1272,12 +1293,15 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     return store.update({
       id: task.id,
       run: {
-        sessionId: null,
+        // Still the task's session: dequeuing must not cost it the conversation.
+        sessionId: task.run?.sessionId ?? null,
         status: 'queued' as TaskRunStatus,
         startedAt: Date.now(),
         endedAt: null,
         message: null,
         attempts: task.run?.attempts ?? 0,
+        ...(task.run?.sessionRuns === undefined ? {} : { sessionRuns: task.run.sessionRuns }),
+        ...(task.run?.kind === undefined ? {} : { kind: task.run.kind }),
       },
     })
   }

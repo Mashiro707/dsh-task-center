@@ -31,6 +31,8 @@ interface TaskRun {
   message: string | null
   /** 1 on the first launch; grows with each retry. */
   attempts: number
+  /** How many runs have used this session (1 on a fresh one). */
+  sessionRuns?: number
   /** Planning or execution; defaults to execution for rows written before stages. */
   kind?: TaskRunKind
 }

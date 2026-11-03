@@ -273,6 +273,10 @@ function normalizeRun(raw: unknown): TaskRun | null {
       : 'failed'
   const attempts = Number.isFinite(source.attempts) && (source.attempts as number) > 0 ? Math.trunc(source.attempts as number) : status === 'queued' ? 0 : 1
   const kind: TaskRunKind | undefined = source.kind === 'plan' || source.kind === 'execute' ? source.kind : undefined
+  const sessionRuns =
+    Number.isFinite(source.sessionRuns) && (source.sessionRuns as number) > 0
+      ? Math.trunc(source.sessionRuns as number)
+      : undefined
   return {
     sessionId: typeof source.sessionId === 'string' && source.sessionId !== '' ? source.sessionId : null,
     status,
@@ -281,6 +285,7 @@ function normalizeRun(raw: unknown): TaskRun | null {
     message: typeof source.message === 'string' && source.message !== '' ? source.message : null,
     attempts,
     ...(kind === undefined ? {} : { kind }),
+    ...(sessionRuns === undefined ? {} : { sessionRuns }),
   }
 }
 

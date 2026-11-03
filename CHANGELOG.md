@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-11-03
+
+### Added
+
+- `run.sessionRuns` records how many runs share the task session, and a continuation prompt ends with a line saying which round it is.
+
+### Changed
+
+- A session now carries at most six runs. From the seventh the task opens a fresh conversation, so a long task starts from its stage documents and the code instead of an ever-growing history.
+- Queuing a task no longer forgets its session: `sessionId`, `sessionRuns` and the run kind survive the `queued` row.
 ## [1.12.0] - 2026-11-02
 
 ### Added
