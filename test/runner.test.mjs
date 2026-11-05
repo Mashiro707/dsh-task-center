@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { createTaskStore } from '../index.js'
 import { apply } from '../index.js'
-import { buildPrompt, createRunner, createUserMessage, service } from '../runner.js'
+import { buildPrompt, classifyFailure, createRunner, createUserMessage, service } from '../runner.js'
 import { stageRelPath, writeStageDocs } from '../stages.js'
 
 /** Poll until `check` returns something truthy, or fail. */
@@ -1546,6 +1546,65 @@ test('a task opens a new session once the conversation is long', async () => {
     assert.equal(host.created.length, 1, 'a fresh conversation is opened')
     assert.equal(row.run.sessionRuns, 1, 'and the count starts over')
     assert.notEqual(row.run.sessionId, 'session-9')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a failure that cannot heal by itself is not retried', () => {
+  assert.deepEqual(classifyFailure('agent-error', 'invalid request: bad parameter'), {
+    retryable: false,
+    reason: '请求无效',
+  })
+  assert.equal(classifyFailure('agent-error', 'maximum context length exceeded').retryable, false)
+  assert.equal(classifyFailure('agent-error', 'socket hang up').retryable, true)
+  assert.equal(classifyFailure('agent-error', 'ECONNREFUSED 127.0.0.1:443').retryable, true)
+  assert.equal(classifyFailure('agent-error', 'something odd happened').retryable, true, 'unknown failures still get one more try')
+  assert.equal(classifyFailure('timeout', 'ran too long').retryable, true)
+})
+
+test('an agent error that cannot heal does not start a second run', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '不可恢复', workspacePath: workspace })
+    await runner.saveSettings({ retries: 1 })
+
+    const row = await runner.start(task.id)
+    const agent = host.agents.get(row.run.sessionId)
+    host.emit('agent/error', { agent, error: new Error('invalid request: bad parameter') })
+    await waitFor(async () => {
+      const current = (await store.list()).tasks.find(entry => entry.id === task.id)
+      return current?.run?.status === 'failed' ? current : null
+    })
+
+    assert.equal(host.created.length, 1, 'no retry was started')
+    const after = (await store.list()).tasks.find(entry => entry.id === task.id)
+    assert.match(String(after.run.message), /不再重试：请求无效/)
+  } finally {
+    await dispose()
+  }
+})
+
+test('a transient agent error is retried once', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '可恢复', workspacePath: workspace })
+    await runner.saveSettings({ retries: 1 })
+
+    const row = await runner.start(task.id)
+    const agent = host.agents.get(row.run.sessionId)
+    host.emit('agent/error', { agent, error: new Error('ECONNRESET while streaming') })
+    await waitFor(() => (host.created.length === 2 ? true : null))
+
+    assert.equal(host.created.length, 2, 'the retry opened a new session')
   } finally {
     await dispose()
   }

@@ -25,6 +25,57 @@ const MAX_CONCURRENCY = 4;
  * @type {number}
  */
 const MAX_SESSION_RUNS = 6;
+/**
+ * Names that mean "this will fail again if you run it again": no budget is
+ * spent retrying them. Anything unmatched is treated the same way.
+ * @type {Array<[RegExp, string]>}
+ */
+const FATAL_PATTERNS = [
+    [/context (window|length|limit)|too many tokens/i, '上下文超长'],
+    [/cancel/i, '被取消'],
+    [/reject/i, '被拒绝'],
+    [/unauthori[sz]ed|forbidden|401|403/i, '权限问题'],
+    [/invalid (request|argument|parameter)|bad request|400/i, '请求无效'],
+    [/ENOENT|not found|not configured/i, '找不到资源'],
+    [/unsupported|not supported/i, '不支持'],
+];
+/** Errors that may pass on the next attempt. @type {RegExp[]} */
+const TRANSIENT_PATTERNS = [
+    /ECONN/i,
+    /ETIMEDOUT/i,
+    /EAI_AGAIN/i,
+    /socket hang up/i,
+    /network/i,
+    /rate.?limit/i,
+    /429/,
+    /5dd/,
+    /overloaded/i,
+    /temporarily/i,
+    /超时/,
+    /模型/,
+];
+/**
+ * Decide whether a failed run deserves another attempt.
+ * @param {'timeout' | 'agent-error'} kind - what ended the run.
+ * @param {string} message - the failure text.
+ * @returns {{ retryable: boolean; reason: string }} the verdict and why.
+ */
+export function classifyFailure(kind, message) {
+    const text = typeof message === 'string' ? message : '';
+    if (kind === 'timeout')
+        return { retryable: true, reason: '超时' };
+    for (const [pattern, reason] of FATAL_PATTERNS) {
+        if (pattern.test(text))
+            return { retryable: false, reason };
+    }
+    for (const pattern of TRANSIENT_PATTERNS) {
+        if (pattern.test(text))
+            return { retryable: true, reason: '临时故障' };
+    }
+    // Everything else keeps the old behaviour: it may have been a hiccup. Only
+    // the patterns above are known to repeat themselves.
+    return { retryable: true, reason: '临时或未知' };
+}
 /** Preset that reviews each call before it runs; the closest thing to unattended. */
 const DEFAULT_PRESET = 'auto';
 /** Retries the panel may ask for, on top of the first attempt. */
@@ -968,7 +1019,8 @@ export function createRunner(ctx, store) {
             if (sessionToTask.get(sessionId) !== taskId)
                 return;
             cancelSession(sessionId);
-            void settle(taskId, sessionId, 'failed', `运行超时（${minutes} 分钟）`, { retry: true });
+            const verdict = classifyFailure('timeout', `运行超时（${minutes} 分钟）`);
+            void settle(taskId, sessionId, 'failed', `运行超时（${minutes} 分钟）`, { retry: verdict.retryable });
         }, minutes * 60 * 1000);
         if (typeof handle === 'object' && handle !== null && 'unref' in handle)
             handle.unref();
@@ -1412,7 +1464,10 @@ export function createRunner(ctx, store) {
         note(`agent/error ${scope} ${sessionId === '' ? 'no-agent' : sessionId}`);
         if (taskId === undefined)
             return;
-        void settle(taskId, sessionId, 'failed', describe(payload?.error), { retry: true });
+        const raw = describe(payload?.error);
+        const verdict = classifyFailure('agent-error', raw);
+        const message = verdict.retryable ? raw : `${raw}（不再重试：${verdict.reason}）`;
+        void settle(taskId, sessionId, 'failed', message, { retry: verdict.retryable });
     }
     function onAgentDisposed(payload, scope) {
         const sessionId = payload?.agent?.id ?? '';

@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-11-05
+
+### Added
+
+- `classifyFailure()` tells apart failures that will simply repeat (context overflow, cancelled, rejected, auth, bad request, missing resource, unsupported) from ones worth another attempt. Only the latter consume `retries`.
+
+### Changed
+
+- An agent error that cannot heal now settles the run with `（不再重试：<reason>）` appended to its message instead of silently retrying.
 ## [1.13.0] - 2026-11-03
 
 ### Added
