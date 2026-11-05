@@ -428,6 +428,13 @@ window.__ModuleLoader__.load({
          * @param {number} startedAt - when the run started.
          * @returns {string} compact elapsed time for the running pill.
          */
+        function formatTokens(value) {
+            if (!(value > 0))
+                return '';
+            if (value >= 1000)
+                return (value / 1000).toFixed(1).replace(/.0$/, '') + 'k tok';
+            return String(Math.round(value)) + ' tok';
+        }
         function elapsedLabel(startedAt) {
             const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
             const minutes = Math.floor(seconds / 60);
@@ -814,6 +821,7 @@ window.__ModuleLoader__.load({
             for (const name of task.tags) {
                 meta.push(h('span', { key: 'tag:' + name, className: 'tc-tag' }, name));
             }
+            const tokensLabel = run === null ? '' : formatTokens(run.tokens);
             return h('div', {
                 className: 'tc-card' +
                     (task.status === 'done' ? ' tc-card-done' : '') +
@@ -897,7 +905,7 @@ window.__ModuleLoader__.load({
                 }))), h('span', { className: 'tc-stagebar-text' }, stageAwaiting
                     ? t('awaitBadge')
                     : t('groupStages') + ' ' + String(Math.min(stageIndex + 1, stages.length)) + '/' + String(stages.length)))
-                : null, hasMeta ? h('div', { className: 'tc-card-meta' }, meta) : null);
+                : null, hasMeta || tokensLabel !== '' ? h('div', { className: 'tc-card-meta' }, meta, tokensLabel === '' ? null : h('span', { className: 'tc-tokens' }, tokensLabel)) : null);
         }
         function BoardColumn(props) {
             const t = props.t;
@@ -2056,6 +2064,7 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-runpill:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 20%,transparent)}
 .tc-run-dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary);animation:tc-pulse 1.4s ease-in-out infinite}
 .tc-run-time{min-width:17px;text-align:right}
+.tc-tokens{font-size:12px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
 .tc-play-icon,.tc-stop-icon{display:block}
 @keyframes tc-pulse{0%,100%{opacity:1}50%{opacity:.2}}
 

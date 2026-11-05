@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-11-05
+
+### Added
+
+- Every run records the context tokens the Host estimates (`tokenMeter.measure(agent.session)`) and the card shows them as `1.2k tok`; a Host without a meter leaves `run.tokens` null instead of inventing a number.
+- `settings` diagnostics now carry `measureKeys`, so the fields a Host actually returns stay visible while adapting to a different build.
 ## [1.14.0] - 2026-11-05
 
 ### Added

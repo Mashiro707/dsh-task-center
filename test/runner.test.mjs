@@ -98,6 +98,8 @@ function makeHost(options = {}) {
     resolve: (name) => specs[name] ?? {},
   }
 
+  const meter = options.meter === undefined ? { measure: () => ({ tokens: 1234 }) } : options.meter === null ? undefined : options.meter
+
   const toolNames = []
   const ctx = {
     logger: { warn() {}, info() {} },
@@ -112,6 +114,8 @@ function makeHost(options = {}) {
     get(name) {
       if (name === 'sessionController') return controller
       if (name === 'permissionPresets') return presets
+      if (name === 'agents') return { get: (id) => agents.get(id) }
+      if (name === 'tokenMeter') return meter
       return undefined
     },
     on(event, listener) {
@@ -337,6 +341,45 @@ test('going idle closes the run, and the outcome lands in the store', async () =
     // And it survived a reload, which proves the row was written.
     const reopened = await createTaskStore({ dataFile }).list()
     assert.equal(reopened.tasks[0].run.status, 'done')
+  } finally {
+    await dispose()
+  }
+})
+
+test('the run records the context tokens the host estimates', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '用量', cwd: 'C:/work/app' })
+
+    await runner.start(task.id)
+    host.emit('agent/status', { agent: host.agents.get('session-1'), status: 'idle' })
+    const settled = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row.run.tokens !== null ? row : null
+    })
+    assert.equal(settled.run.tokens, 1234, 'the estimate is kept on the run')
+    assert.deepEqual((await runner.stats()).measureKeys, ['tokens'], 'and the shape is visible for later checks')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a host without a token meter leaves the count empty', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost({ meter: null })
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '没有计量', cwd: 'C:/work/app' })
+
+    await runner.start(task.id)
+    host.emit('agent/status', { agent: host.agents.get('session-1'), status: 'idle' })
+    const settled = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row.run.status === 'done' ? row : null
+    })
+    assert.equal(settled.run.tokens, null, 'nothing is invented')
   } finally {
     await dispose()
   }

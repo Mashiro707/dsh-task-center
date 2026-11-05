@@ -230,6 +230,7 @@ function normalizeRun(raw) {
         : 'failed';
     const attempts = Number.isFinite(source.attempts) && source.attempts > 0 ? Math.trunc(source.attempts) : status === 'queued' ? 0 : 1;
     const kind = source.kind === 'plan' || source.kind === 'execute' ? source.kind : undefined;
+    const tokens = Number.isFinite(source.tokens) && source.tokens >= 0 ? Math.trunc(source.tokens) : null;
     const sessionRuns = Number.isFinite(source.sessionRuns) && source.sessionRuns > 0
         ? Math.trunc(source.sessionRuns)
         : undefined;
@@ -242,6 +243,7 @@ function normalizeRun(raw) {
         attempts,
         ...(kind === undefined ? {} : { kind }),
         ...(sessionRuns === undefined ? {} : { sessionRuns }),
+        tokens,
     };
 }
 /**

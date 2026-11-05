@@ -284,3 +284,10 @@ test('a stage that starts waiting for approval is announced', () => {
   assert.match(text, /document\.title = waiting > 0/, 'the window title carries the count too')
   assert.match(text, /\}, 20000\)/, 'the panel re-reads the board while it is open')
 })
+
+test('a card shows the estimated context tokens of its run', () => {
+  const text = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(text, /\.tc-tokens\{/, 'the chip has its own style')
+  assert.match(text, /function formatTokens\(/, 'the count is formatted once')
+  assert.match(text, /formatTokens\(run\.tokens\)/, 'it reads the run, not the task')
+})

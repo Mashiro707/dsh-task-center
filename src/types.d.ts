@@ -33,6 +33,8 @@ interface TaskRun {
   attempts: number
   /** How many runs have used this session (1 on a fresh one). */
   sessionRuns?: number
+  /** Estimated context tokens of the conversation at the end of the run. */
+  tokens?: number | null
   /** Planning or execution; defaults to execution for rows written before stages. */
   kind?: TaskRunKind
 }

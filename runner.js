@@ -914,6 +914,44 @@ export function createRunner(ctx, store) {
      *   allowed, and whether to apply an outcome saved before its row existed.
      * @returns {Promise<void>} resolves once the store is updated.
      */
+    /** @type {string[]} field names the token meter answered with, for diagnostics. */
+    let lastMeasureKeys = [];
+    /**
+     * Estimated context tokens of a session, when the Host exposes a meter.
+     * @param {string} sessionId - the session to measure.
+     * @returns {number | null} tokens, or null when the Host cannot tell.
+     */
+    function measureTokens(sessionId) {
+        const meter = service(ctx, 'tokenMeter');
+        if (meter === undefined || typeof meter.measure !== 'function')
+            return null;
+        const agents = service(ctx, 'agents');
+        const agent = agents !== undefined && typeof agents.get === 'function' ? agents.get(sessionId) : undefined;
+        if (agent === undefined)
+            return null;
+        let measured;
+        try {
+            measured = meter.measure(agent.session);
+        }
+        catch (error) {
+            note(`measure ${sessionId}: ${describe(error)}`);
+            return null;
+        }
+        if (measured === null || typeof measured !== 'object')
+            return null;
+        const bag = measured;
+        lastMeasureKeys = Object.keys(bag).slice(0, 12);
+        for (const key of ['tokens', 'total', 'totalTokens', 'estimate', 'contextTokens']) {
+            const value = bag[key];
+            if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+                return Math.trunc(value);
+        }
+        const prompt = bag.promptTokens;
+        const completion = bag.completionTokens;
+        if (typeof prompt === 'number' && typeof completion === 'number')
+            return Math.trunc(prompt + completion);
+        return null;
+    }
     async function settle(taskId, sessionId, status, message, options = {}) {
         if (options.force !== true && sessionToTask.get(sessionId) !== taskId) {
             note(`settle ${taskId}: 会话已不在本 runner 名下`);
@@ -961,9 +999,10 @@ export function createRunner(ctx, store) {
             }
             attempts = run.attempts;
             retryable = options.retry === true && message !== null;
+            const measured = measureTokens(sessionId);
             await store.update({
                 id: taskId,
-                run: { ...run, status, endedAt: Date.now(), message },
+                run: { ...run, status, endedAt: Date.now(), message, tokens: measured === null ? (run.tokens ?? null) : measured },
             });
             // The stage decides what happens next: verify it, advance, or record the
             // failure. Only after that row is on disk, so a crash cannot skip it.
@@ -1774,6 +1813,7 @@ export function createRunner(ctx, store) {
                 statusSamples: [...diagnostics.statusSamples],
                 eventTypes: Object.fromEntries(diagnostics.eventTypes),
                 notes: [...diagnostics.notes],
+                measureKeys: [...lastMeasureKeys],
             };
         },
         async saveSettings(patch = {}) {

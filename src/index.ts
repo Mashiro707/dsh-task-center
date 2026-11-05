@@ -273,6 +273,8 @@ function normalizeRun(raw: unknown): TaskRun | null {
       : 'failed'
   const attempts = Number.isFinite(source.attempts) && (source.attempts as number) > 0 ? Math.trunc(source.attempts as number) : status === 'queued' ? 0 : 1
   const kind: TaskRunKind | undefined = source.kind === 'plan' || source.kind === 'execute' ? source.kind : undefined
+  const tokens =
+    Number.isFinite(source.tokens) && (source.tokens as number) >= 0 ? Math.trunc(source.tokens as number) : null
   const sessionRuns =
     Number.isFinite(source.sessionRuns) && (source.sessionRuns as number) > 0
       ? Math.trunc(source.sessionRuns as number)
@@ -286,6 +288,7 @@ function normalizeRun(raw: unknown): TaskRun | null {
     attempts,
     ...(kind === undefined ? {} : { kind }),
     ...(sessionRuns === undefined ? {} : { sessionRuns }),
+    tokens,
   }
 }
 
