@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-11-05
+
+### Added
+
+- A run that finishes or fails while the panel is open raises a desktop notification (once per run), and the window title shows `▶ N` while runs are in flight.
+- A real-browser regression, opt-in with `DSH_LIVE_BROWSER=1 npm run test:browser`: it bundles the panel, serves it to the Edge that ships with Windows, and asserts the things jsdom cannot see — four equal-width columns, the 10px card radius, 12/13px type, the dropdown list portalled with `position: fixed`, and no horizontal overflow.
+
+### Changed
+
+- `playwright-core` and `esbuild` join the dev-only dependencies; the published plugin still has no runtime dependencies.
+
 ## [1.17.0] - 2026-11-05
 
 ### Added

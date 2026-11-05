@@ -109,6 +109,8 @@ window.__ModuleLoader__.load({
         hideDoc: '收起文档',
         docEmpty: '文档还没生成。',
         awaitBadge: '待批准',
+        runDoneBadge: '任务跑完了',
+        runFailedBadge: '任务失败了',
         openSession: '打开这个任务的会话',
         openSessionFailed: '打不开会话（这个窗口可能没有工作区服务），会话 id 已复制到剪贴板。',
         noticeApproved: '已批准，开跑就会按文档执行。',
@@ -251,6 +253,8 @@ window.__ModuleLoader__.load({
         hideDoc: 'Hide document',
         docEmpty: 'No document yet.',
         awaitBadge: 'Awaiting approval',
+        runDoneBadge: 'Task finished',
+        runFailedBadge: 'Task failed',
         openSession: "Open this task's conversation",
         openSessionFailed: 'Could not open the conversation here; its id was copied instead.',
         noticeApproved: 'Approved — the next run follows the document.',
@@ -1987,6 +1991,7 @@ window.__ModuleLoader__.load({
       // from another window, so poll while the panel is mounted and tell the
       // desktop once per stage.
       const notified = React.useRef({})
+      const seenRun = React.useRef({})
       React.useEffect(() => {
         const timer = window.setInterval(() => {
           void refresh()
@@ -2026,9 +2031,22 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         let waiting = 0
+        let running = 0
         const fresh: any[] = []
+        const ended: any[] = []
         for (const task of tasks) {
-          if (task.deletedAt !== null || task.status === 'done') continue
+          if (task.deletedAt !== null) continue
+          const run = task.run === null || task.run === undefined ? null : task.run
+          const runStatus = run === null || typeof run.status !== 'string' ? null : run.status
+          // Only a run that was seen running can end: the first poll after a
+          // reload must not replay every task that finished yesterday.
+          const seen = seenRun.current[task.id]
+          seenRun.current[task.id] = runStatus
+          if (runStatus === 'running') running += 1
+          if (seen === 'running' && (runStatus === 'done' || runStatus === 'failed')) {
+            ended.push({ task, failed: runStatus === 'failed' })
+          }
+          if (task.status === 'done') continue
           const stages = Array.isArray(task.stages) ? task.stages : []
           const index = typeof task.stageIndex === 'number' ? task.stageIndex : 0
           const stage = stages.length === 0 ? null : stages[Math.min(index, stages.length - 1)]
@@ -2040,14 +2058,24 @@ window.__ModuleLoader__.load({
           fresh.push(task)
         }
         try {
-          document.title = waiting > 0 ? '⚠ ' + String(waiting) + ' · ' + t('nav') : t('nav')
+          document.title = waiting > 0
+            ? '⚠ ' + String(waiting) + ' · ' + t('nav')
+            : running > 0
+              ? '▶ ' + String(running) + ' · ' + t('nav')
+              : t('nav')
         } catch (error) {
           // A title is not worth a crash.
         }
-        if (fresh.length === 0) return
+        if (fresh.length === 0 && ended.length === 0) return
         try {
           if (typeof Notification !== 'function' || Notification.permission !== 'granted') return
           for (const task of fresh) new Notification(t('awaitBadge'), { body: task.title })
+          for (const entry of ended) {
+            const line = entry.task.run !== null && typeof entry.task.run.message === 'string' ? entry.task.run.message : ''
+            new Notification(entry.failed ? t('runFailedBadge') : t('runDoneBadge'), {
+              body: line === '' ? entry.task.title : entry.task.title + ' — ' + line,
+            })
+          }
         } catch (error) {
           // Notifications are best effort.
         }

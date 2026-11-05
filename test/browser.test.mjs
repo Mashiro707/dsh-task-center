@@ -30,7 +30,21 @@ async function mount(fixtures) {
     }
     saved.clear()
   }
-  const names = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'getComputedStyle', 'requestAnimationFrame']
+  // Timers and notifications are captured so a poll can be driven by the test.
+  const intervals = []
+  const notifications = []
+  window.setInterval = (callback) => {
+    intervals.push(callback)
+    return intervals.length
+  }
+  window.clearInterval = () => {}
+  window.Notification = class {
+    static permission = 'granted'
+    constructor(title, options) {
+      notifications.push({ title, ...options })
+    }
+  }
+  const names = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'getComputedStyle', 'requestAnimationFrame', 'Notification']
   for (const name of names) {
     if (window[name] === undefined) continue
     saved.set(name, Object.getOwnPropertyDescriptor(globalThis, name))
@@ -108,6 +122,19 @@ async function mount(fixtures) {
           await new Promise(resolve => setTimeout(resolve, 0))
         })
       },
+      /** Run whatever the panel registered on an interval, once. */
+      async tick() {
+        for (const callback of intervals) {
+          await React.act(async () => {
+            callback()
+            await new Promise(resolve => setTimeout(resolve, 0))
+          })
+        }
+        await React.act(async () => {
+          await new Promise(resolve => setTimeout(resolve, 0))
+        })
+      },
+      notifications,
       dispose() {
         React.act(() => {
           root.unmount()
@@ -236,6 +263,38 @@ test('the run button posts to the run route', async () => {
     const posted = panel.fetched.find(entry => entry.route === 'run')
     assert.ok(posted !== undefined, 'the panel asked the host to run the task')
     assert.equal(posted.body.id, 't1')
+  } finally {
+    panel.dispose()
+  }
+})
+
+test('a run that finishes while the panel is open raises a notification', async () => {
+  let round = 0
+  const running = task('t1', 'doing', '写文档', {
+    workspaceId: 'ws-1',
+    run: { sessionId: 's-1', status: 'running', startedAt: 1, endedAt: null, message: null, attempts: 1 },
+  })
+  const finished = task('t1', 'doing', '写文档', {
+    workspaceId: 'ws-1',
+    run: { sessionId: 's-1', status: 'done', startedAt: 1, endedAt: 2, message: null, attempts: 1 },
+  })
+  const panel = await mount({
+    list: () => {
+      round += 1
+      return board([round === 1 ? running : finished])
+    },
+    workspaces: [],
+    permissions: { options: [], available: false },
+    settings: { autoRun: false, concurrency: 2, available: false },
+  })
+  try {
+    assert.equal(panel.notifications.length, 0, 'a still-running task says nothing')
+    await panel.tick()
+    assert.equal(panel.notifications.length, 1, 'the finished run is announced once')
+    assert.equal(panel.notifications[0].title, 'runDoneBadge')
+    assert.match(panel.notifications[0].body, /写文档/)
+    await panel.tick()
+    assert.equal(panel.notifications.length, 1, 'and only once')
   } finally {
     panel.dispose()
   }
