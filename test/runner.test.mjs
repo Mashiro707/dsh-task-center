@@ -1382,9 +1382,13 @@ test('a task keeps one session from stage to stage', async () => {
     const agent = host.agents.get(sessionId)
     agent.status = 'idle'
     host.emit('agent/status', { agent, status: 'idle' })
+    // Wait until the whole close-out is written: the run row first, then the
+    // stage row. Starting on the half-written state is a race, not a feature.
     await waitFor(async () => {
       const row = (await store.list()).tasks.find(entry => entry.id === task.id)
-      return row.run?.status === 'running' ? null : row
+      if (row === undefined || row.run?.status === 'running') return null
+      const stage = row.stages[row.stageIndex]
+      return stage === undefined || stage.status === 'running' ? null : row
     })
 
     const again = await runner.start(task.id)
@@ -1409,9 +1413,13 @@ test('a session that is gone is replaced instead of reused', async () => {
     const agent = host.agents.get(first.run.sessionId)
     agent.status = 'idle'
     host.emit('agent/status', { agent, status: 'idle' })
+    // The close-out writes the run row and then the stage row: wait for both,
+    // otherwise the next start races a stage that is still marked running.
     await waitFor(async () => {
       const row = (await store.list()).tasks.find(entry => entry.id === task.id)
-      return row.run?.status === 'running' ? null : row
+      if (row === undefined || row.run?.status === 'running') return null
+      const stage = row.stages[row.stageIndex]
+      return stage === undefined || stage.status === 'running' ? null : row
     })
     host.agents.delete(first.run.sessionId)
 

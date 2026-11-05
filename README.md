@@ -161,6 +161,8 @@ task-center/<task id>            分支名，基于当时的 HEAD
 
 - 写入走「临时文件 + rename」，避免半个文件
 - 读到损坏的 JSON 会先备份成 `tasks.json.corrupt-<时间戳>`，再重建空文档
+- 每次写都是一个完整的临时文件再 `rename`，不会留下半个文档
+- 所有改动排成一条队列，并在 `tasks.json.lock` 上加跨进程锁：两个请求同时到也不会互相覆盖；Host 崩溃留下的锁超过 15 秒会被拆掉，不会把看板锁死
 - 删除是软删除（记 `deletedAt`），彻底清除才真正移除
 - 阶段文档写在任务工作区的 `docs/task-center/<任务id>/stage-<n>.md`，是普通 Markdown 文件，可以直接用编辑器改（改完仍是「待批准」，重跑会按新内容执行）
 

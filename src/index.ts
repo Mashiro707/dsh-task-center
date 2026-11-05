@@ -10,7 +10,7 @@
  * without a build step or a dependency resolution of `@deepseek-ai/*`.
  */
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -518,6 +518,12 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
   let loading: Promise<TaskRecord[]> | null = null
   let warning: string | null = null
   let writeChain: Promise<void> = Promise.resolve()
+  /** Serialises every read-modify-write, so two callers cannot overwrite each other. */
+  let tail: Promise<unknown> = Promise.resolve()
+  let cachedMtimeMs = 0
+  const lockFile = `${dataFile}.lock`
+  const LOCK_STALE_MS = 15000
+  const LOCK_TRIES = 40
 
   /** @returns {Promise<TaskRecord[]>} the current records. */
   async function readRecords(): Promise<TaskRecord[]> {
@@ -536,6 +542,11 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
       }
       try {
         cache = normalizeRecords(JSON.parse(text))
+        try {
+          cachedMtimeMs = (await stat(dataFile)).mtimeMs
+        } catch {
+          cachedMtimeMs = 0
+        }
       } catch {
         const backup = `${dataFile}.corrupt-${Date.now()}`
         try {
@@ -553,6 +564,61 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
     } finally {
       loading = null
     }
+  }
+
+  /**
+   * Reload the document when another process replaced it, so a long-lived Host
+   * does not keep writing a stale copy.
+   * @returns {Promise<TaskRecord[]>} the freshest records.
+   */
+  async function freshen(): Promise<TaskRecord[]> {
+    const records = await readRecords()
+    let mtimeMs = 0
+    try {
+      mtimeMs = (await stat(dataFile)).mtimeMs
+    } catch {
+      return records
+    }
+    if (mtimeMs === cachedMtimeMs) return records
+    cache = null
+    cachedMtimeMs = 0
+    return readRecords()
+  }
+
+  /**
+   * Take the cross-process write lock.
+   * @returns {Promise<() => Promise<void>>} release callback.
+   */
+  async function takeLock(): Promise<() => Promise<void>> {
+    await mkdir(dirname(dataFile), { recursive: true })
+    for (let attempt = 0; attempt < LOCK_TRIES; attempt += 1) {
+      try {
+        const handle = await open(lockFile, 'wx')
+        await handle.writeFile(String(process.pid), 'utf8')
+        await handle.close()
+        return async () => {
+          try {
+            await unlink(lockFile)
+          } catch {
+            // Losing the lock file early is not a failure of the write itself.
+          }
+        }
+      } catch (error) {
+        if (error === null || typeof error !== 'object' || (error as { code?: unknown }).code !== 'EEXIST') throw error
+        // A crashed writer must not wedge the board forever.
+        try {
+          const info = await stat(lockFile)
+          if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
+            await unlink(lockFile)
+            continue
+          }
+        } catch {
+          // The lock vanished between the failed open and the stat: just retry.
+        }
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+    }
+    throw storeError('busy', '任务清单正被另一个进程写入，请稍后重试。')
   }
 
   /**
@@ -583,15 +649,29 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
    * @returns {Promise<T>} whatever the change returns.
    */
   async function transact<T>(mutate: (records: TaskRecord[]) => T): Promise<T> {
-    const current = await readRecords()
-    const draft = current.map(record => ({
-      ...record,
-      tags: [...record.tags],
-      stages: record.stages.map(stage => ({ ...stage, scope: [...stage.scope], verify: [...stage.verify] })),
-    }))
-    const result = mutate(draft)
-    await commit(draft)
-    return result
+    // One mutation at a time, in this process and across processes: two callers
+    // that both read before either write would otherwise drop one change.
+    const run = tail.then(async () => {
+      const release = await takeLock()
+      try {
+        const current = await freshen()
+        const draft = current.map(record => ({
+          ...record,
+          tags: [...record.tags],
+          stages: record.stages.map(stage => ({ ...stage, scope: [...stage.scope], verify: [...stage.verify] })),
+        }))
+        const result = mutate(draft)
+        await commit(draft)
+        return result
+      } finally {
+        await release()
+      }
+    })
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
   }
 
   /**
@@ -634,7 +714,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
      * @returns {Promise<TaskBoard>} the board payload.
      */
     async list() {
-      const records = await readRecords()
+      const records = await freshen()
       const tasks = records.filter(record => record.deletedAt === null)
       const trash = records
         .filter((record): record is TaskRecord & { deletedAt: number } => record.deletedAt !== null && record.trashRoot === record.id)

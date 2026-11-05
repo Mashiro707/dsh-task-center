@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-11-05
+
+### Fixed
+
+- Two changes that landed at the same time no longer overwrite each other: every mutation runs through one queue and holds a `tasks.json.lock` file, so the read-modify-write is serialised across this Host and any other process.
+- A lock left behind by a crashed Host is broken after 15 seconds instead of wedging the board.
+- `list()` reloads the file when another process replaced it, so two windows do not show a stale board.
 ## [1.15.0] - 2026-11-05
 
 ### Added

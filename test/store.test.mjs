@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { utimes } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -210,4 +212,44 @@ test('blockers are stored, de-duplicated and reloaded', async () => {
   assert.deepEqual(patched.blockedBy, [first.id])
   const cleared = await store.update({ id: second.id, blockedBy: [] })
   assert.deepEqual(cleared.blockedBy, [])
+})
+
+test('concurrent creates all survive', async () => {
+  const { store, dataFile, dispose } = await makeStore()
+  try {
+    await Promise.all(Array.from({ length: 25 }, (_, index) => store.create({ title: '并发 ' + String(index) })))
+    const board = await createTaskStore({ dataFile }).list()
+    assert.equal(board.tasks.length, 25, 'no create was overwritten by another')
+  } finally {
+    await dispose()
+  }
+})
+
+test('two stores on one file see each other', async () => {
+  const { store, dataFile, dispose } = await makeStore()
+  try {
+    const other = createTaskStore({ dataFile })
+    await store.create({ title: '一' })
+    const seen = await other.list()
+    assert.equal(seen.tasks.length, 1, 'the second store reloaded the file')
+    await other.create({ title: '二' })
+    assert.equal((await store.list()).tasks.length, 2)
+  } finally {
+    await dispose()
+  }
+})
+
+test('a stale write lock is broken instead of wedging the board', async () => {
+  const { store, dataFile, dispose } = await makeStore()
+  try {
+    const lock = dataFile + '.lock'
+    await writeFile(lock, '99999', 'utf8')
+    const old = Date.now() / 1000 - 60
+    await utimes(lock, old, old)
+    const created = await store.create({ title: '抢锁' })
+    assert.equal(created.title, '抢锁')
+    assert.equal(existsSync(lock), false, 'the lock is gone after the write')
+  } finally {
+    await dispose()
+  }
 })
