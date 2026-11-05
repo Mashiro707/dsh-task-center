@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-11-05
+
+### Added
+
+- A real end-to-end test for the browser half: `test/browser.test.mjs` loads `client.js` into jsdom, mounts the panel with React, and drives it with clicks — four columns and every card render, a card opens the drawer with its stage list, and the run button posts to the `run` route.
+
+### Changed
+
+- `jsdom`, `react` and `react-dom` are dev-only dependencies; the published plugin still has no runtime dependencies.
 ## [1.16.0] - 2026-11-05
 
 ### Fixed
