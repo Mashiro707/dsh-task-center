@@ -634,6 +634,41 @@ test('cancelling a run that no longer exists clears the busy stage', async () =>
   }
 })
 
+test('a session reused by a later stage can still settle', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '同一个会话跑两轮', workspacePath: workspace })
+
+    const first = await runner.start(task.id)
+    const sessionId = first.run.sessionId
+    host.agents.get(sessionId).status = 'idle'
+    host.emit('agent/status', { agent: host.agents.get(sessionId), status: 'idle' })
+    await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row.run !== null && row.run.status !== 'running' ? row : null
+    })
+
+    // The stage failed without a document, so running again plans once more in
+    // the same conversation: that second attempt has to settle too.
+    const second = await runner.start(task.id)
+    assert.equal(second.run.sessionId, sessionId, 'the conversation is reused')
+    host.agents.get(sessionId).status = 'idle'
+    host.emit('agent/status', { agent: host.agents.get(sessionId), status: 'idle' })
+
+    const done = await waitFor(async () => {
+      const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+      return row.run !== null && row.run.status !== 'running' && row.run.attempts === 2 ? row : null
+    })
+    assert.ok(done.run.endedAt !== null, 'the second attempt was settled, not swallowed')
+  } finally {
+    await dispose()
+  }
+})
+
 test('the route dispatches run, settings and the delete alias', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'task-center-route-'))
   const previous = process.env.DSH_HOME

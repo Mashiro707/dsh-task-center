@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.0] - 2026-11-10
+
+### Fixed
+
+- A stage reused the same conversation but its outcome was dropped: the settle guard remembered the session, not the attempt, so the second and later runs of one session never closed and the row stayed `running` forever.
+- An outcome landed on the wrong stage. The runner followed the board cursor when a run ended, and the cursor can move while a run is still closing, so a finished stage could stay `running` and its successor could be skipped. Each run now records the stage it was opened for, and both the outcome and the advance use that number.
+
 ## [1.25.0] - 2026-11-10
 
 ### Fixed

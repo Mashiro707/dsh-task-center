@@ -768,8 +768,12 @@ export function createRunner(ctx, store) {
      * @param {string | null} message - why it ended, when it failed.
      * @returns {Promise<void>} resolves once the board is updated.
      */
-    async function finishStage(task, kind, passed, message) {
-        const stage = currentStage(task);
+    async function finishStage(task, kind, passed, message, ordinal) {
+        // The cursor can move while a run is still closing, so an outcome must land
+        // on the stage that run was opened for, not on whatever is current now.
+        const stage = ordinal === undefined
+            ? currentStage(task)
+            : task.stages.find((entry) => entry.index === ordinal) ?? null;
         if (stage === null)
             return;
         if (kind === 'plan') {
@@ -893,12 +897,13 @@ export function createRunner(ctx, store) {
         const current = board.tasks.find(entry => entry.id === task.id);
         if (current === undefined)
             return;
-        const nextIndex = current.stageIndex + 1;
-        const stages = current.stages.map((entry, position) => {
-            if (position === current.stageIndex) {
+        const position = stage.index;
+        const nextIndex = position + 1;
+        const stages = current.stages.map((entry) => {
+            if (entry.index === position) {
                 return { ...entry, status: 'done', message: null, output, endedAt: Date.now() };
             }
-            if (position === nextIndex && entry.status === 'draft') {
+            if (entry.index === nextIndex && entry.status === 'draft') {
                 return { ...entry, status: 'awaiting-approval' };
             }
             return entry;
@@ -907,7 +912,7 @@ export function createRunner(ctx, store) {
         await store.update({
             id: current.id,
             stages,
-            stageIndex: finished ? current.stageIndex : nextIndex,
+            stageIndex: finished ? current.stageIndex : Math.max(current.stageIndex, nextIndex),
             ...(finished ? { status: 'done' } : {}),
         });
         note(`stage ${stage.index} done`);
@@ -1019,7 +1024,7 @@ export function createRunner(ctx, store) {
             });
             // The stage decides what happens next: verify it, advance, or record the
             // failure. Only after that row is on disk, so a crash cannot skip it.
-            await finishStage(task, run.kind ?? 'execute', status === 'done', message);
+            await finishStage(task, run.kind ?? 'execute', status === 'done', message, run.stageIndex);
         }
         catch (error) {
             ctx.logger?.warn?.(`[task-center] 运行结果没能写回任务 ${taskId}：${describe(error)}`);
@@ -1160,11 +1165,17 @@ export function createRunner(ctx, store) {
                     attempts: attempt,
                     sessionRuns: 1,
                     kind: mode.kind,
+                    stageIndex: mode.stage.index,
                 },
             });
         }
         const preset = (task.permission ?? '').trim();
         installPreset(agent, preset === '' ? config.preset : preset, task.autoApprove === true);
+        // A later stage reuses this session, so an earlier attempt's settle must not
+        // swallow this one: the guard is about one attempt, not one session.
+        const settledAt = settledSessions.indexOf(agent.id);
+        if (settledAt !== -1)
+            settledSessions.splice(settledAt, 1);
         // Register before the prompt: the agent may flip to running immediately.
         sessionToTask.set(agent.id, task.id);
         taskToSession.set(task.id, agent.id);
@@ -1220,6 +1231,7 @@ export function createRunner(ctx, store) {
                 attempts: attempt,
                 sessionRuns,
                 kind: mode.kind,
+                stageIndex: mode.stage.index,
             },
         });
         // An outcome may have arrived before this row existed; honour it now.
