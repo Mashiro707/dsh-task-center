@@ -669,6 +669,32 @@ test('a session reused by a later stage can still settle', async () => {
   }
 })
 
+test('a cursor left on a finished stage moves on by itself', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '游标停在已完成阶段', workspacePath: workspace })
+    await store.update({
+      id: task.id,
+      stageIndex: 0,
+      stages: [
+        { title: '一', goal: 'g', docPath: '', scope: [], verify: [], status: 'done', message: null, output: null, startedAt: 1, endedAt: 2 },
+        { title: '二', goal: 'g', docPath: '', scope: [], verify: [], status: 'draft', message: null, output: null, startedAt: null, endedAt: null },
+      ],
+    })
+
+    const run = await runner.start(task.id)
+    assert.equal(run.run.kind, 'plan', 'the second stage is planned instead of refused')
+    const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+    assert.equal(row.stageIndex, 1, 'the cursor caught up with the work')
+  } finally {
+    await dispose()
+  }
+})
+
 test('the route dispatches run, settings and the delete alias', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'task-center-route-'))
   const previous = process.env.DSH_HOME

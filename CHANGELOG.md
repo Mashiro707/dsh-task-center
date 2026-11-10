@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.1] - 2026-11-10
+
+### Fixed
+
+- Running a task whose cursor sits on a finished stage answered "当前阶段已经完成" and did nothing. The runner now walks forward to the first stage that still has work and starts from there, which also repairs boards left behind by the older cursor drift.
+
 ## [1.26.0] - 2026-11-10
 
 ### Fixed

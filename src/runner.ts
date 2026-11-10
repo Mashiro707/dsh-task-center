@@ -882,7 +882,17 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     if (stage.status === 'awaiting-approval') {
       throw runnerError('awaiting-approval', `阶段 ${stage.index} 的文档已经写好，等你在面板上批准。`)
     }
-    if (stage.status === 'done') throw runnerError('no-stage', '当前阶段已经完成，没有待执行的阶段。')
+    if (stage.status === 'done') {
+      // A cursor left on a finished stage (an older build could do that) should
+      // move to the first stage that still has work instead of refusing to run.
+      const next = task.stages.find((entry) => entry.status !== 'done')
+      if (next === undefined) throw runnerError('no-stage', '所有阶段都已完成。')
+      // The cursor is a position in the list, so derive it that way rather than
+      // trusting a stage's own index field.
+      const position = task.stages.indexOf(next)
+      await store.update({ id: task.id, stageIndex: position })
+      return resolveMode({ ...task, stageIndex: position })
+    }
     if (stage.status === 'draft') {
       const root = workspaceRoot(task)
       const ready = root !== '' && (await fileExists(stageAbsPath(root, stage.docPath)))
