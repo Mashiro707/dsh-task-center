@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.24.0] - 2026-11-10
+
+### Added
+
+- A rejected (or failed) stage now carries its own **Run again** button in the stage row, so the loop stays inside the dialog: reject, read the reason, run it again without going back to the card. The button is disabled while that task is running.
+
 ## [1.23.0] - 2026-11-10
 
 ### Changed

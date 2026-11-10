@@ -268,6 +268,49 @@ test('the run button posts to the run route', async () => {
   }
 })
 
+test('a rejected stage offers to run again from its own row', async () => {
+  const panel = await mount({
+    list: board([
+      task('t1', 'todo', '\u5199\u6587\u6863', {
+        workspaceId: 'ws-1',
+        workspacePath: 'C:/work',
+        stages: [
+          {
+            index: 0,
+            title: '\u8bfb\u4ee3\u7801',
+            goal: 'g',
+            docPath: '',
+            scope: [],
+            verify: [],
+            status: 'draft',
+            message: '\u6587\u6863\u88ab\u9a73\u56de\uff1a\u8303\u56f4\u5199\u9519\u4e86',
+            output: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        ],
+        stageIndex: 0,
+      }),
+    ]),
+    workspaces: [{ id: 'ws-1', path: 'C:/work', title: 'work' }],
+    permissions: { options: [], available: false },
+    settings: { autoRun: false, concurrency: 2, available: false },
+  })
+  try {
+    const card = panel.container.querySelector('.tc-card')
+    await panel.click(card)
+    const button = panel.document.querySelector('.tc-stage-acts [data-action="rerun"]')
+    assert.ok(button !== null, 'the rejected stage carries a re-run button')
+    assert.equal(button.disabled, false, 'it is usable once the document is rejected')
+    await panel.click(button)
+    const posted = panel.fetched.find(entry => entry.route === 'run')
+    assert.ok(posted !== undefined, 'the button asks the host to run the task again')
+    assert.equal(posted.body.id, 't1')
+  } finally {
+    panel.dispose()
+  }
+})
+
 test('a run that finishes while the panel is open raises a notification', async () => {
   let round = 0
   const running = task('t1', 'doing', '写文档', {

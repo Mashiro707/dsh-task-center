@@ -103,6 +103,8 @@ window.__ModuleLoader__.load({
         rejectConfirm: '确认驳回',
         rejectCancel: '取消',
         reverify: '重新验收',
+        rerun: '重新执行',
+        rerunHint: '按这个阶段现在的状态再跑一次：没有文档就重新规划，有文档就执行',
         noticeReverified: '验收通过，进入下一阶段',
         viewDoc: '查看文档',
         crashTitle: '面板出错了，错误详情已记录到任务板（[client-error] 开头的任务）。',
@@ -247,6 +249,8 @@ window.__ModuleLoader__.load({
         rejectConfirm: 'Reject it',
         rejectCancel: 'Cancel',
         reverify: 'Re-check',
+        rerun: 'Run again',
+        rerunHint: 'Run this stage again: plan when there is no document, execute when there is one',
         noticeReverified: 'Check passed; the next stage is open',
         viewDoc: 'View document',
         crashTitle: 'The panel hit an error; the details were filed on the board as a [client-error] task.',
@@ -1812,6 +1816,22 @@ function TaskCard(props) {
                               t('checkDoc'),
                             )
                           : null,
+                        current && (entry.status === 'draft' || entry.status === 'failed')
+                          ? h(
+                              'button',
+                              {
+                                type: 'button',
+                                className: 'tc-btn tc-btn-quiet',
+                                'data-action': 'rerun',
+                                title: t('rerunHint'),
+                                disabled: task.run !== null && task.run !== undefined && task.run.status === 'running',
+                                onClick: () => {
+                                  void props.onRun(task.id)
+                                },
+                              },
+                              t('rerun'),
+                            )
+                          : null,
                         entry.status === 'failed'
                           ? h(
                               'button',
@@ -2589,6 +2609,7 @@ function TaskCard(props) {
                 void mutate('delete', { id })
               },
               onOpenTask: (id) => setOpenId(id),
+              onRun: startRun,
               onStageAction: stageAction,
               onStageCheck: stageCheck,
               onStageDoc: stageDoc,
