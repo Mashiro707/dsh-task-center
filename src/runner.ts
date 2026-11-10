@@ -88,10 +88,14 @@ const DEFAULT_PRESET = 'auto'
 const MAX_RETRIES = 3
 
 /** Wall-clock limit for one attempt, in minutes, when nobody configured one. */
-const DEFAULT_TIMEOUT_MINUTES = 30
+// Zero means no limit: some tasks legitimately run for hours, and killing one
+// because it outlived a default nobody chose is worse than letting it finish.
+const DEFAULT_TIMEOUT_MINUTES = 0
 
 /** Upper bound the timeout setting is clamped to, in minutes. */
 const MAX_TIMEOUT_MINUTES = 24 * 60
+// Bumped when a stored field changes meaning; version 2 turned the timeout off.
+const SETTINGS_VERSION = 2
 
 /** Settings the panel edits, persisted next to the task file. */
 export interface RunnerSettings {
@@ -379,12 +383,17 @@ export function buildStagePrompt(
 /**
  * Coerce anything into a usable settings object.
  * @param {unknown} raw - parsed file contents.
+ * @param {boolean} legacy - the file predates settings version 2.
  * @returns {RunnerSettings} normalized settings.
  */
-function normalizeSettings(raw: unknown): RunnerSettings {
+function normalizeSettings(raw: unknown, legacy = false): RunnerSettings {
   const source = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const concurrency = Number.isFinite(source.concurrency) ? Math.trunc(source.concurrency as number) : 2
-  const timeout = Number.isFinite(source.timeoutMinutes) ? (source.timeoutMinutes as number) : DEFAULT_TIMEOUT_MINUTES
+  const timeout = legacy
+    ? DEFAULT_TIMEOUT_MINUTES
+    : Number.isFinite(source.timeoutMinutes)
+      ? (source.timeoutMinutes as number)
+      : DEFAULT_TIMEOUT_MINUTES
   const retries = Number.isFinite(source.retries) ? Math.trunc(source.retries as number) : 0
   return {
     autoRun: source.autoRun === true,
@@ -635,7 +644,12 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   async function readSettings(): Promise<RunnerSettings> {
     if (settings !== null) return settings
     try {
-      settings = normalizeSettings(JSON.parse(await readFile(settingsFile, 'utf8')))
+      const parsed: unknown = JSON.parse(await readFile(settingsFile, 'utf8'))
+      // Files written before version 2 were handed the old thirty-minute default,
+      // so a long task was killed without anyone asking for it: read them unlimited.
+      const legacy =
+        parsed === null || typeof parsed !== 'object' || (parsed as Record<string, unknown>).version === undefined
+      settings = normalizeSettings(parsed, legacy)
     } catch {
       settings = normalizeSettings(null)
     }
@@ -650,7 +664,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   async function writeSettings(next: RunnerSettings): Promise<void> {
     await mkdir(dirname(settingsFile), { recursive: true })
     const temp = `${settingsFile}.${process.pid}.tmp`
-    await writeFile(temp, JSON.stringify(next, null, 2), 'utf8')
+    await writeFile(temp, JSON.stringify({ version: SETTINGS_VERSION, ...next }, null, 2), 'utf8')
     await rename(temp, settingsFile)
     settings = next
   }

@@ -2517,7 +2517,7 @@ window.__ModuleLoader__.load({
                     min: 0,
                     max: 1440,
                     'aria-label': t('field.timeout'),
-                    value: String(typeof runner.timeoutMinutes === 'number' ? runner.timeoutMinutes : 30),
+                    value: String(typeof runner.timeoutMinutes === 'number' ? runner.timeoutMinutes : 0),
                     onChange: (event) => void saveSetting({ timeoutMinutes: Number(event.target.value) }),
                   }),
                 ),

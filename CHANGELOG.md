@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-11-10
+
+### Changed
+
+- Runs are no longer killed after thirty minutes by default: `timeoutMinutes` is `0` (no limit), because some tasks legitimately run for hours. Set a number to bound one; `0` stays unbounded.
+- A settings file written before this version (no `version` field) is read as unbounded even when it carries the old `30`, so an inherited default is not mistaken for a decision. The file gains `version: 2` on the next save.
+
 ## [1.18.0] - 2026-11-05
 
 ### Added

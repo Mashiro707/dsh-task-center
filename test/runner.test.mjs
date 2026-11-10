@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -491,7 +491,7 @@ test('settings persist, clamp and reload', async () => {
       autoRun: false,
       concurrency: 2,
       preset: 'auto',
-      timeoutMinutes: 30,
+      timeoutMinutes: 0,
       retries: 0,
     })
 
@@ -503,6 +503,9 @@ test('settings persist, clamp and reload', async () => {
     assert.equal(raw.autoRun, true)
     assert.equal(raw.concurrency, 3)
 
+    assert.equal(raw.version, 2, 'the file carries the settings version')
+    assert.equal(raw.timeoutMinutes, 0, 'no attempt is killed by a default nobody chose')
+
     const clamped = await runner.saveSettings({ concurrency: 99 })
     assert.equal(clamped.concurrency, 4)
     assert.equal(clamped.autoRun, true, 'a partial patch keeps the rest')
@@ -512,6 +515,29 @@ test('settings persist, clamp and reload', async () => {
     assert.equal(reloaded.autoRun, true)
     assert.equal(reloaded.concurrency, 4)
     assert.equal(reloaded.preset, 'auto')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a settings file from before version 2 stops killing long runs', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    // The shape 1.18.0 wrote: the old thirty-minute default, no version marker.
+    await writeFile(
+      join(dir, 'settings.json'),
+      JSON.stringify({ autoRun: false, concurrency: 2, preset: 'auto', timeoutMinutes: 30, retries: 0 }),
+      'utf8',
+    )
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const loaded = await runner.settings()
+    assert.equal(loaded.timeoutMinutes, 0, 'an inherited default is not a choice anyone made')
+
+    await runner.saveSettings({ concurrency: 3 })
+    const raw = JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8'))
+    assert.equal(raw.version, 2)
+    assert.equal(raw.timeoutMinutes, 0, 'saving keeps the runs unbounded')
   } finally {
     await dispose()
   }
@@ -529,7 +555,7 @@ test('an uncomposed session controller is reported, not crashed', async () => {
       autoRun: false,
       concurrency: 2,
       preset: 'auto',
-      timeoutMinutes: 30,
+      timeoutMinutes: 0,
       retries: 0,
     })
   } finally {

@@ -81,9 +81,13 @@ const DEFAULT_PRESET = 'auto';
 /** Retries the panel may ask for, on top of the first attempt. */
 const MAX_RETRIES = 3;
 /** Wall-clock limit for one attempt, in minutes, when nobody configured one. */
-const DEFAULT_TIMEOUT_MINUTES = 30;
+// Zero means no limit: some tasks legitimately run for hours, and killing one
+// because it outlived a default nobody chose is worse than letting it finish.
+const DEFAULT_TIMEOUT_MINUTES = 0;
 /** Upper bound the timeout setting is clamped to, in minutes. */
 const MAX_TIMEOUT_MINUTES = 24 * 60;
+// Bumped when a stored field changes meaning; version 2 turned the timeout off.
+const SETTINGS_VERSION = 2;
 /**
  * @param {string} code - stable error code the route maps to a status.
  * @param {string} message - user-facing text.
@@ -237,12 +241,17 @@ export function buildStagePrompt(task, cwd, stage, docText, board = []) {
 /**
  * Coerce anything into a usable settings object.
  * @param {unknown} raw - parsed file contents.
+ * @param {boolean} legacy - the file predates settings version 2.
  * @returns {RunnerSettings} normalized settings.
  */
-function normalizeSettings(raw) {
+function normalizeSettings(raw, legacy = false) {
     const source = raw !== null && typeof raw === 'object' ? raw : {};
     const concurrency = Number.isFinite(source.concurrency) ? Math.trunc(source.concurrency) : 2;
-    const timeout = Number.isFinite(source.timeoutMinutes) ? source.timeoutMinutes : DEFAULT_TIMEOUT_MINUTES;
+    const timeout = legacy
+        ? DEFAULT_TIMEOUT_MINUTES
+        : Number.isFinite(source.timeoutMinutes)
+            ? source.timeoutMinutes
+            : DEFAULT_TIMEOUT_MINUTES;
     const retries = Number.isFinite(source.retries) ? Math.trunc(source.retries) : 0;
     return {
         autoRun: source.autoRun === true,
@@ -506,7 +515,11 @@ export function createRunner(ctx, store) {
         if (settings !== null)
             return settings;
         try {
-            settings = normalizeSettings(JSON.parse(await readFile(settingsFile, 'utf8')));
+            const parsed = JSON.parse(await readFile(settingsFile, 'utf8'));
+            // Files written before version 2 were handed the old thirty-minute default,
+            // so a long task was killed without anyone asking for it: read them unlimited.
+            const legacy = parsed === null || typeof parsed !== 'object' || parsed.version === undefined;
+            settings = normalizeSettings(parsed, legacy);
         }
         catch {
             settings = normalizeSettings(null);
@@ -521,7 +534,7 @@ export function createRunner(ctx, store) {
     async function writeSettings(next) {
         await mkdir(dirname(settingsFile), { recursive: true });
         const temp = `${settingsFile}.${process.pid}.tmp`;
-        await writeFile(temp, JSON.stringify(next, null, 2), 'utf8');
+        await writeFile(temp, JSON.stringify({ version: SETTINGS_VERSION, ...next }, null, 2), 'utf8');
         await rename(temp, settingsFile);
         settings = next;
     }
