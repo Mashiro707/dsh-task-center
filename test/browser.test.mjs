@@ -299,3 +299,59 @@ test('a run that finishes while the panel is open raises a notification', async 
     panel.dispose()
   }
 })
+
+test('a stage document is rendered as markdown, not as raw text', async () => {
+  const markdown = [
+    '# \u9636\u6bb5 1\uff1a\u5206\u652f\u4e0e\u5de5\u7a0b\u5e95\u5ea7',
+    '',
+    '> \u4efb\u52a1\uff1a\u5361\u5238',
+    '',
+    '## \u76ee\u6807',
+    '',
+    '\u5728 `allynav-data-v2-master` \u4e0a\u65b0\u5efa **feature** \u5206\u652f\u3002',
+    '',
+    '- \u5141\u8bb8\u6539\u52a8\u4e00',
+    '- \u5141\u8bb8\u6539\u52a8\u4e8c',
+    '',
+    '```bash',
+    'go build ./...',
+    '```',
+  ].join('\n')
+  const panel = await mount({
+    list: board([
+      task('t1', 'doing', '\u5361\u5238\u4efb\u52a1', {
+        workspaceId: 'ws-1',
+        stages: [
+          { index: 0, title: '\u9636\u6bb5\u4e00', goal: 'g', docPath: 'docs/a/stage-1.md', scope: [], verify: [], status: 'awaiting-approval', message: null, output: null, startedAt: 1, endedAt: null },
+        ],
+        stageIndex: 0,
+      }),
+    ]),
+    workspaces: [],
+    permissions: { options: [], available: false },
+    settings: { autoRun: false, concurrency: 2, available: false },
+    stageDoc: { path: 'docs/a/stage-1.md', text: markdown },
+  })
+  try {
+    const card = panel.container.querySelector('.tc-card')
+    await panel.click(card)
+    const view = panel.document.querySelector('.tc-stage-acts .tc-btn-quiet')
+    assert.ok(view !== null, 'the stage offers its document')
+    await panel.click(view)
+    await React.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    const doc = panel.document.querySelector('.tc-md')
+    assert.ok(doc !== null, 'the document is a markdown block')
+    assert.equal(doc.querySelectorAll('h2').length, 1, 'a level one heading becomes h2')
+    assert.equal(doc.querySelectorAll('h3').length, 1, 'a level two heading becomes h3')
+    assert.equal(doc.querySelectorAll('.tc-md-ul > li').length, 2, 'bullets become list items')
+    assert.ok(doc.querySelector('.tc-md-code') !== null, 'inline code is marked up')
+    assert.equal(doc.querySelector('.tc-md-pre > code').textContent, 'go build ./...', 'a fence keeps its lines')
+    assert.ok(doc.querySelector('.tc-md-p strong') !== null, 'bold wraps a strong element')
+    assert.ok(doc.querySelector('.tc-md-quote') !== null, 'a quote is its own block')
+    assert.doesNotMatch(doc.textContent, /^#\s/m, 'no raw heading syntax is left on screen')
+  } finally {
+    panel.dispose()
+  }
+})

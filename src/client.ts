@@ -922,7 +922,155 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------ parts
 
-    function TaskCard(props) {
+      // Stage documents are markdown. Rendering to React elements (never to an HTML
+  // string) keeps a document that happens to contain markup inert.
+  const INLINE_MD = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]\n]+\]\([^)\s]+\))/g
+
+  function inlineMarkdown(text) {
+    const out: any[] = []
+    let last = 0
+    let match = INLINE_MD.exec(text)
+    while (match !== null) {
+      if (match.index > last) out.push(text.slice(last, match.index))
+      const token = match[0]
+      const key = 'i' + out.length
+      if (token.charAt(0) === '`') {
+        out.push(h('code', { key, className: 'tc-md-code' }, token.slice(1, -1)))
+      } else if (token.slice(0, 2) === '**') {
+        out.push(h('strong', { key }, token.slice(2, -2)))
+      } else if (token.charAt(0) === '*') {
+        out.push(h('em', { key }, token.slice(1, -1)))
+      } else {
+        const cut = token.indexOf('](')
+        out.push(
+          h(
+            'a',
+            { key, className: 'tc-md-link', href: token.slice(cut + 2, -1), target: '_blank', rel: 'noreferrer' },
+            token.slice(1, cut),
+          ),
+        )
+      }
+      last = match.index + token.length
+      match = INLINE_MD.exec(text)
+      if (match !== null && match.index === last) INLINE_MD.lastIndex = last + 1
+    }
+    if (last < text.length) out.push(text.slice(last))
+    return out
+  }
+
+  function tableCells(line) {
+    return line
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((cell) => cell.trim())
+  }
+
+  function renderMarkdown(source) {
+    const lines = String(source).replace(/\r\n?/g, '\n').split('\n')
+    const blocks: any[] = []
+    let index = 0
+    while (index < lines.length) {
+      const trimmed = lines[index].trim()
+      const key = 'b' + index
+      if (trimmed === '') {
+        index += 1
+        continue
+      }
+      if (trimmed.slice(0, 3) === '```') {
+        const body: string[] = []
+        index += 1
+        while (index < lines.length && lines[index].trim().slice(0, 3) !== '```') {
+          body.push(lines[index])
+          index += 1
+        }
+        index += 1
+        blocks.push(h('pre', { key, className: 'tc-md-pre' }, h('code', {}, body.join('\n'))))
+        continue
+      }
+      const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed)
+      if (heading !== null) {
+        const level = Math.min(heading[1].length + 1, 6)
+        blocks.push(h('h' + level, { key, className: 'tc-md-h' + level }, inlineMarkdown(heading[2])))
+        index += 1
+        continue
+      }
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+        blocks.push(h('hr', { key, className: 'tc-md-hr' }))
+        index += 1
+        continue
+      }
+      if (trimmed.charAt(0) === '>') {
+        const quoted: string[] = []
+        while (index < lines.length && lines[index].trim().charAt(0) === '>') {
+          quoted.push(lines[index].trim().replace(/^>\s?/, ''))
+          index += 1
+        }
+        blocks.push(h('blockquote', { key, className: 'tc-md-quote' }, inlineMarkdown(quoted.join(' '))))
+        continue
+      }
+      const next = index + 1 < lines.length ? lines[index + 1].trim() : ''
+      if (trimmed.charAt(0) === '|' && next.indexOf('-') >= 0 && /^\|?[\s:|-]+\|/.test(next)) {
+        const head = tableCells(trimmed)
+        index += 2
+        const rows: string[][] = []
+        while (index < lines.length && lines[index].trim().charAt(0) === '|') {
+          rows.push(tableCells(lines[index]))
+          index += 1
+        }
+        blocks.push(
+          h(
+            'div',
+            { key, className: 'tc-md-table-wrap' },
+            h(
+              'table',
+              { className: 'tc-md-table' },
+              h('thead', {}, h('tr', {}, head.map((cell, at) => h('th', { key: 'h' + at }, inlineMarkdown(cell))))),
+              h(
+                'tbody',
+                {},
+                rows.map((row, at) =>
+                  h('tr', { key: 'r' + at }, row.map((cell, col) => h('td', { key: 'c' + col }, inlineMarkdown(cell)))),
+                ),
+              ),
+            ),
+          ),
+        )
+        continue
+      }
+      const bullet = /^[-*+]\s+(.*)$/.exec(trimmed)
+      const ordered = /^\d+[.)]\s+(.*)$/.exec(trimmed)
+      if (bullet !== null || ordered !== null) {
+        const isOrdered = ordered !== null
+        const items: any[] = []
+        while (index < lines.length) {
+          const current = lines[index].trim()
+          const hit = isOrdered ? /^\d+[.)]\s+(.*)$/.exec(current) : /^[-*+]\s+(.*)$/.exec(current)
+          if (hit === null) break
+          items.push(h('li', { key: 'l' + items.length }, inlineMarkdown(hit[1])))
+          index += 1
+        }
+        blocks.push(h(isOrdered ? 'ol' : 'ul', { key, className: isOrdered ? 'tc-md-ol' : 'tc-md-ul' }, items))
+        continue
+      }
+      const paragraph: string[] = []
+      while (index < lines.length) {
+        const plain = lines[index].trim()
+        if (plain === '') break
+        if (/^#{1,6}\s/.test(plain)) break
+        if (plain.slice(0, 3) === '```' || plain.charAt(0) === '>' || plain.charAt(0) === '|') break
+        if (/^(-{3,}|\*{3,}|_{3,})$/.test(plain)) break
+        if (/^[-*+]\s+/.test(plain) || /^\d+[.)]\s+/.test(plain)) break
+        paragraph.push(plain)
+        index += 1
+      }
+      blocks.push(h('p', { key, className: 'tc-md-p' }, inlineMarkdown(paragraph.join(' '))))
+    }
+    return blocks
+  }
+
+function TaskCard(props) {
       const task = props.task
       const subtasks = props.subtasks
       const t = props.t
@@ -1676,7 +1824,11 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'tc-fieldhint' }, t('stageHint')),
                 doc === null
                   ? null
-                  : h('pre', { className: 'tc-doc' }, doc.text.trim() === '' ? t('docEmpty') : doc.text),
+                  : h(
+                      'div',
+                      { className: 'tc-doc tc-md' },
+                      doc.text.trim() === '' ? t('docEmpty') : renderMarkdown(doc.text),
+                    ),
               )
             : null,
           h(
@@ -2859,7 +3011,26 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-out{margin:4px 0 0;padding:6px;max-height:180px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .tc-btn-quiet{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}
 .tc-btn-quiet:hover{color:var(--dsw-alias-label-primary)}
-.tc-doc{margin:0;max-height:min(46vh,420px);overflow:auto;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.tc-doc{margin:0;max-height:min(46vh,420px);overflow:auto;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.6}
+.tc-md>*+*{margin-top:8px}
+.tc-md-h2,.tc-md-h3,.tc-md-h4,.tc-md-h5,.tc-md-h6{margin:0;font-weight:600;line-height:1.4}
+.tc-md-h2{font-size:13px}
+.tc-md-h3{font-size:13px;color:var(--dsw-alias-label-primary)}
+.tc-md-h4,.tc-md-h5,.tc-md-h6{font-size:12px;color:var(--dsw-alias-label-secondary)}
+.tc-md-h2:not(:first-child){margin-top:12px;padding-top:10px;border-top:1px solid var(--dsw-alias-border-l1)}
+.tc-md-p{margin:0;font-size:13px}
+.tc-md-ul,.tc-md-ol{margin:0;padding-left:18px;font-size:13px}
+.tc-md-ul>li,.tc-md-ol>li{margin:2px 0}
+.tc-md-code{padding:1px 4px;border-radius:4px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.tc-md-pre{margin:0;padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);overflow:auto;font-size:12px;line-height:1.55}
+.tc-md-pre>code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.tc-md-quote{margin:0;padding:2px 0 2px 10px;border-left:2px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);font-size:12px}
+.tc-md-hr{height:0;margin:10px 0;border:0;border-top:1px solid var(--dsw-alias-border-l1)}
+.tc-md-link{color:var(--dsw-alias-brand-primary);text-decoration:underline;text-underline-offset:2px}
+.tc-md-table-wrap{overflow:auto}
+.tc-md-table{width:100%;border-collapse:collapse;font-size:12px}
+.tc-md-table th,.tc-md-table td{padding:4px 8px;border:1px solid var(--dsw-alias-border-l1);text-align:left}
+.tc-md-table th{background:var(--dsw-alias-bg-layer-2);font-weight:600}
 .tc-field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .tc-field-row{display:flex;gap:10px}
 .tc-field-half{flex:1 1 0;min-width:0}

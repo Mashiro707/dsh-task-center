@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-11-10
+
+### Added
+
+- Stage documents are rendered as markdown instead of being dumped as raw text: headings, quotes, bullet and numbered lists, inline code, fenced blocks, tables, links, bold and italics, with the panel's own 12/13px scale and theme colours.
+- The renderer emits React elements rather than an HTML string, so a document that contains markup stays inert.
+
 ## [1.20.0] - 2026-11-10
 
 ### Changed

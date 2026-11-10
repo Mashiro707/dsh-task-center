@@ -46,8 +46,26 @@ function board() {
     stages: [],
     stageIndex: 0,
   })
+  // The first task carries one stage document so the markdown view can be driven.
+  const first = task('t1', 'todo', '\u5199\u6587\u6863')
+  first.stages = [
+    {
+      index: 0,
+      title: '\u5206\u652f\u4e0e\u5de5\u7a0b\u5e95\u5ea7',
+      goal: '',
+      docPath: 'docs/t1/stage-1.md',
+      scope: [],
+      verify: [],
+      status: 'awaiting-approval',
+      message: null,
+      output: null,
+      startedAt: 1,
+      endedAt: null,
+    },
+  ]
+  first.stageIndex = 0
   return {
-    tasks: [task('t1', 'todo', '写文档'), task('t2', 'doing', '改接口'), task('t3', 'blocked', '等权限'), task('t4', 'done', '发版')],
+    tasks: [first, task('t2', 'doing', '\u6539\u63a5\u53e3'), task('t3', 'blocked', '\u7b49\u6743\u9650'), task('t4', 'done', '\u53d1\u7248')],
     trash: [],
     warning: null,
   }
@@ -106,6 +124,25 @@ test('the panel lays out correctly in a real browser', { skip: !enabled && 'set 
       page.on('console', message => console.log('[console]', message.type(), message.text()))
       page.on('requestfailed', request => console.log('[failed]', request.url(), request.failure() && request.failure().errorText))
     }
+      const markdown = [
+        '# \u9636\u6bb5 1\uff1a\u5206\u652f\u4e0e\u5de5\u7a0b\u5e95\u5ea7',
+        '',
+        '> \u4efb\u52a1\uff1a\u5361\u5238\u4efb\u52a1\u3002\u672c\u6587\u6863\u7531\u89c4\u5212\u9636\u6bb5\u751f\u6210\u3002',
+        '',
+        '## \u76ee\u6807',
+        '',
+        '\u5728 `allynav-data-v2-master` \u4e0e `farminfo-biz` \u4e0a\u57fa\u4e8e **master** \u65b0\u5efa\u5206\u652f\uff0c\u5e76\u628a\u4ea4\u4ed8\u5305\u5185\u672a\u6267\u884c\u7684 DDL \u6458\u8981\u843d\u5230 `sql/` \u76ee\u5f55\u3002',
+        '',
+        '## \u5141\u8bb8\u6539\u52a8',
+        '',
+        '- `allynav-data-v2-master/api/coupon`',
+        '- `farminfo-biz/internal/controller/coupon`',
+        '',
+        '```bash',
+        'cd allynav-data-v2 && go build ./app/export/...',
+        '```',
+      ].join('\n')
+
     await page.addInitScript(payload => {
       window.__FIXTURE__ = payload
     }, {
@@ -113,6 +150,7 @@ test('the panel lays out correctly in a real browser', { skip: !enabled && 'set 
       workspaces: [{ id: 'ws-1', path: 'C:/work/one', title: '默认工作区' }, { id: 'ws-2', path: 'C:/work/two', title: '另一个' }],
       permissions: { options: [{ value: 'workspace-write', name: 'workspace-write' }], defaultPreset: 'workspace-write', available: true },
       settings: { autoRun: false, concurrency: 2, preset: 'auto', available: true },
+      stageDoc: { path: 'docs/t1/stage-1.md', text: markdown },
     })
     await page.goto(site.url, { waitUntil: 'load' })
     await page.waitForSelector('.tc-board', { timeout: 15000 })
@@ -171,6 +209,19 @@ test('the panel lays out correctly in a real browser', { skip: !enabled && 'set 
 
     const dialogOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     assert.ok(dialogOverflow <= 1, `the dialog adds no overflow (${dialogOverflow}px)`)
+
+
+    // The stage document has to read like a document, not like source text.
+    await page.locator('.tc-stage-acts .tc-btn-quiet').first().click()
+    await page.waitForSelector('.tc-md h2', { timeout: 10000 })
+    const heading = await page.$eval('.tc-md h2', node => window.getComputedStyle(node).fontSize)
+    assert.equal(heading, '13px', 'a heading is 13px, not source-sized')
+    const quote = await page.$eval('.tc-md-quote', node => window.getComputedStyle(node).fontSize)
+    assert.equal(quote, '12px', 'the document quote is 12px')
+    const fence = await page.$eval('.tc-md-pre > code', node => node.textContent)
+    assert.match(fence, /go build/, 'a fenced block keeps its command')
+    const leftover = await page.$eval('.tc-md', node => node.textContent.slice(0, 24))
+    assert.ok(!leftover.trimStart().startsWith('#'), 'no raw heading syntax left on screen')
 
     // Handy when someone wants to see what the dialog looks like without
     // opening the app: DSH_LIVE_SHOT=1 keeps a screenshot next to the bundle.
