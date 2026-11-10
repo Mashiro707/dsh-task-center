@@ -1235,6 +1235,26 @@ export function createRunner(ctx, store) {
         return record;
     }
     /**
+     * Clear a stage left in `running` by a run that no longer exists.
+     * @param {string} taskId - the task to look at.
+     * @returns {Promise<boolean>} whether anything was cleared.
+     */
+    async function clearStaleStage(taskId) {
+        const board = await store.list();
+        const task = board.tasks.find(entry => entry.id === taskId);
+        if (task === undefined)
+            return false;
+        const stage = currentStage(task);
+        if (stage === null || stage.status !== 'running')
+            return false;
+        const message = '已取消（这次运行已经不在了）';
+        await patchStage(task.id, stage.index, { status: 'failed', message, endedAt: Date.now() });
+        if (task.run !== null) {
+            await writeRun(task.id, { ...task.run, status: 'failed', endedAt: Date.now(), message });
+        }
+        return true;
+    }
+    /**
      * Park one task until a slot frees up.
      * @param {TaskRecord} task - the task to queue.
      * @returns {Promise<TaskRecord>} the task, now with a `queued` run.
@@ -1805,7 +1825,9 @@ export function createRunner(ctx, store) {
                     stopping.add(taskId);
                     return { canceled: true };
                 }
-                return { canceled: false };
+                // A Host restart can leave a row behind with no session at all: the run
+                // is already written as failed but the stage still looks busy forever.
+                return { canceled: await clearStaleStage(taskId) };
             }
             cancelSession(sessionId);
             await settle(taskId, sessionId, 'failed', '已取消');
@@ -1858,12 +1880,18 @@ export function createRunner(ctx, store) {
                 if (run === null)
                     continue;
                 if (run.status === 'running') {
+                    const message = '运行中断（Host 或插件已重启）';
                     await writeRun(task.id, {
                         ...run,
                         status: 'failed',
                         endedAt: run.endedAt ?? Date.now(),
-                        message: '运行中断（Host 或插件已重启）',
+                        message,
                     });
+                    // The stage would otherwise keep saying "running" with nothing behind it.
+                    const stage = currentStage(task);
+                    if (stage !== null && (stage.status === 'running' || stage.status === 'approved')) {
+                        await patchStage(task.id, stage.index, { status: 'failed', message, endedAt: Date.now() });
+                    }
                     repaired += 1;
                     continue;
                 }

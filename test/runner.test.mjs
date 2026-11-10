@@ -585,6 +585,55 @@ test('reconcile marks runs left over from a previous load as interrupted', async
   }
 })
 
+test('reconcile also clears a stage left running by a dead run', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '孤儿阶段', cwd: 'C:/work/app' })
+    await store.update({
+      id: task.id,
+      stageIndex: 0,
+      stages: [
+        { title: '一', goal: 'g', docPath: '', scope: [], verify: ['test -f a'], status: 'running', message: null, output: null, startedAt: 1, endedAt: null },
+      ],
+      run: { sessionId: 'session-gone', status: 'running', startedAt: 1, endedAt: null, message: null },
+    })
+
+    assert.deepEqual(await runner.reconcile(), { repaired: 1, requeued: 0 })
+    const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+    assert.equal(row.stages[0].status, 'failed', 'the stage no longer claims to be running')
+    assert.ok(row.stages[0].message.includes('运行中断'), 'the stage says why it stopped')
+  } finally {
+    await dispose()
+  }
+})
+
+test('cancelling a run that no longer exists clears the busy stage', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '残留', cwd: 'C:/work/app' })
+    await store.update({
+      id: task.id,
+      stageIndex: 0,
+      stages: [
+        { title: '一', goal: 'g', docPath: '', scope: [], verify: ['test -f a'], status: 'running', message: null, output: null, startedAt: 1, endedAt: null },
+      ],
+      run: { sessionId: 'session-gone', status: 'failed', startedAt: 1, endedAt: 2, message: '运行中断（Host 或插件已重启）' },
+    })
+
+    const result = await runner.cancel(task.id)
+    assert.equal(result.canceled, true, 'cancel reports that it cleared something')
+    const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
+    assert.equal(row.stages[0].status, 'failed')
+    assert.match(row.stages[0].message, /已取消/)
+  } finally {
+    await dispose()
+  }
+})
+
 test('the route dispatches run, settings and the delete alias', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'task-center-route-'))
   const previous = process.env.DSH_HOME

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.0] - 2026-11-10
+
+### Fixed
+
+- A stage left in `running` by a Host restart is repaired along with its run. Reconcile used to fix the run row only, so the card and the stage row kept saying "running" with nothing behind them; the stage is now marked failed with the same reason.
+- Cancelling such a row clears it instead of answering `canceled: false`. The stop button reported that there was nothing to stop while the stage stayed busy forever.
+
 ## [1.24.0] - 2026-11-10
 
 ### Added
