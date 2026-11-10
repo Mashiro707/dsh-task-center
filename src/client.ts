@@ -1534,7 +1534,7 @@ function TaskCard(props) {
             { className: 'tc-fields' },
             h(
               'section',
-              { className: 'tc-group' },
+              { className: 'tc-group tc-group-schedule' },
               h('span', { className: 'tc-group-title' }, t('groupSchedule')),
               h(
                 'div',
@@ -1683,7 +1683,7 @@ function TaskCard(props) {
             ),
             h(
               'section',
-              { className: 'tc-group' },
+              { className: 'tc-group tc-group-deps' },
               h('span', { className: 'tc-group-title' }, t('groupDeps')),
               candidates.length === 0
                 ? h('p', { className: 'tc-fieldhint' }, t('noBlockers'))
@@ -1720,7 +1720,7 @@ function TaskCard(props) {
             ),
             h(
               'section',
-              { className: 'tc-group' },
+              { className: 'tc-group tc-group-content' },
               h('span', { className: 'tc-group-title' }, t('groupContent')),
               h(
                 'label',
@@ -2970,13 +2970,13 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-overlay .tc-scrim{position:absolute;inset:0;background:color-mix(in srgb,var(--dsw-alias-bg-base) 58%,transparent);animation:tc-fade-in .16s ease-out}
 .tc-drawer{position:relative;display:flex;flex-direction:column;width:min(1180px,94vw);max-height:min(88vh,880px);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;overflow:hidden;animation:tc-modal-in .18s ease-out}
 @keyframes tc-modal-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
-@media (max-width:720px){.tc-overlay{padding:10px}.tc-drawer{width:96vw;max-height:92vh;border-radius:10px}.tc-fields{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:980px){.tc-fields.tc-fields{grid-template-columns:minmax(0,1fr);grid-template-areas:"schedule" "deps" "content"}.tc-group-content.tc-group-content{display:flex;flex-direction:column}.tc-group-content .tc-textarea{flex:0 0 auto;min-height:120px}}@media (max-width:720px){.tc-overlay{padding:10px}.tc-drawer{width:96vw;max-height:92vh;border-radius:10px}}
 @keyframes tc-fade-in{from{opacity:0}to{opacity:1}}
 .tc-drawer-head{display:flex;align-items:center;gap:6px;padding:12px 12px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .tc-drawer-title{flex:1 1 auto;min-width:0;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;font-weight:600;line-height:1.4;padding:4px 5px;border-radius:7px;outline:none}
 .tc-drawer-title:focus{background:var(--dsw-alias-bg-base);outline:1px solid var(--dsw-alias-border-l2);outline-offset:-1px}
 .tc-drawer-body{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:14px}
-.tc-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));align-content:start;align-items:start;gap:12px}
+.tc-fields{display:grid;grid-template-columns:minmax(0,1.06fr) minmax(0,1fr);grid-template-areas:"schedule content" "deps content";align-content:start;align-items:start;gap:12px}.tc-group-schedule{grid-area:schedule}.tc-group-deps{grid-area:deps}.tc-group-content{grid-area:content;align-self:stretch;display:flex;flex-direction:column}.tc-group-content .tc-field:last-of-type{flex:1 1 auto;display:flex;flex-direction:column}.tc-group-content .tc-textarea{flex:1 1 auto;min-height:150px}
 .tc-drawer-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l1)}
 .tc-drawer-foot .tc-btn{margin-left:auto}
 

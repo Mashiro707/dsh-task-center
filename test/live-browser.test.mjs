@@ -180,6 +180,16 @@ test('the panel lays out correctly in a real browser', { skip: !enabled && 'set 
     assert.ok(button !== null, 'the workspace picker rendered as a drawn dropdown')
     await button.click()
     await page.waitForSelector('.tc-dd-list', { state: 'visible', timeout: 5000 })
+    // The position comes from a measurement taken after the first paint, so wait
+    // for it instead of sampling the frame that happened to be on screen.
+    await page.waitForFunction(
+      () => {
+        const node = document.querySelector('.tc-dd-list')
+        return node !== null && window.getComputedStyle(node).position === 'fixed'
+      },
+      null,
+      { timeout: 5000 },
+    )
     const list = await page.$eval('.tc-dd-list', node => window.getComputedStyle(node).position)
     assert.equal(list, 'fixed', 'the list is portalled with fixed positioning')
     await page.keyboard.press('Escape')

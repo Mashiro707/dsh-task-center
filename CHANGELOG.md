@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] - 2026-11-10
+
+### Changed
+
+- The fields of the task dialog use a two-column layout: status and schedule sit above dependencies on the left, and the content group takes the right column at full height, so the description box grows into the space instead of leaving half the dialog empty.
+
+### Fixed
+
+- The narrow-window rule now wins over the base grid. It was written before the base rule in the stylesheet, so a 640px window still drew two columns; the selectors are doubled (`.tc-fields.tc-fields`) so the order does not matter.
+- On a narrow window the description box keeps the full width instead of shrinking to its text.
+
 ## [1.22.0] - 2026-11-10
 
 ### Fixed
