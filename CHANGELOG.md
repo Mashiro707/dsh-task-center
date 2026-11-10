@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] - 2026-11-10
+
+### Changed
+
+- The field that holds what the task is asking for is now labelled 任务说明 / Description instead of 备注 / Notes: it is the brief the agent reads, not a memo. The prompts and the tool errors use the same wording; the stored field is still `notes` so existing boards keep working.
+
 ## [1.19.0] - 2026-11-10
 
 ### Changed

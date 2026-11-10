@@ -178,9 +178,9 @@ function cleanNotes(value) {
     if (value === null || value === undefined)
         return '';
     if (typeof value !== 'string')
-        throw storeError('invalid-notes', '备注必须是文本。');
+        throw storeError('invalid-notes', '任务说明必须是文本。');
     if (value.length > 20000)
-        throw storeError('invalid-notes', '备注最多 20000 个字符。');
+        throw storeError('invalid-notes', '任务说明最多 20000 个字符。');
     return value;
 }
 /**

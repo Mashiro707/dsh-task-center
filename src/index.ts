@@ -227,8 +227,8 @@ function cleanDue(value: unknown): string | null {
  */
 function cleanNotes(value: unknown): string {
   if (value === null || value === undefined) return ''
-  if (typeof value !== 'string') throw storeError('invalid-notes', '备注必须是文本。')
-  if (value.length > 20000) throw storeError('invalid-notes', '备注最多 20000 个字符。')
+  if (typeof value !== 'string') throw storeError('invalid-notes', '任务说明必须是文本。')
+  if (value.length > 20000) throw storeError('invalid-notes', '任务说明最多 20000 个字符。')
   return value
 }
 
