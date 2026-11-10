@@ -146,6 +146,41 @@ test('the panel lays out correctly in a real browser', { skip: !enabled && 'set 
     assert.equal(list, 'fixed', 'the list is portalled with fixed positioning')
     await page.keyboard.press('Escape')
 
+    // The editor is a centred dialog sized to the viewport, not a narrow rail on
+    // the right edge: this is the thing the drawer got wrong in real use.
+    await page.click('.tc-card')
+    await page.waitForSelector('.tc-drawer', { state: 'visible', timeout: 5000 })
+    const dialog = await page.evaluate(() => {
+      const node = document.querySelector('.tc-drawer')
+      const box = node.getBoundingClientRect()
+      return {
+        width: box.width,
+        left: box.left,
+        right: box.right,
+        height: box.height,
+        body: node.parentElement === document.body || document.body.contains(node),
+        radius: window.getComputedStyle(node).borderTopLeftRadius,
+      }
+    })
+    assert.ok(dialog.width >= 700, `the dialog uses the width (${dialog.width.toFixed(0)}px)`)
+    const centre = (dialog.left + dialog.right) / 2
+    assert.ok(Math.abs(centre - 640) <= 2, `the dialog is centred (centre ${centre.toFixed(1)}px)`)
+    assert.ok(dialog.height <= 860 * 0.9, `the dialog fits the height (${dialog.height.toFixed(0)}px)`)
+    assert.equal(dialog.radius, '12px', 'the dialog is rounded')
+    assert.ok(dialog.body, 'the dialog is portalled to the body')
+
+    const dialogOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    assert.ok(dialogOverflow <= 1, `the dialog adds no overflow (${dialogOverflow}px)`)
+
+    // Handy when someone wants to see what the dialog looks like without
+    // opening the app: DSH_LIVE_SHOT=1 keeps a screenshot next to the bundle.
+    if (process.env.DSH_LIVE_SHOT === '1') {
+      // Outside the bundle directory: the test cleans that up on the way out.
+      const shot = fileURLToPath(new URL('../.panel-shot.png', import.meta.url))
+      await page.screenshot({ path: shot })
+      console.log('[shot]', shot)
+    }
+
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     assert.ok(overflow <= 1, `no horizontal overflow (${overflow}px)`)
   } finally {

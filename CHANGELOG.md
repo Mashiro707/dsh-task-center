@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-11-10
+
+### Changed
+
+- The task editor is a dialog now, not a drawer: it centres itself, takes `min(1040px, 92vw)` by `min(88vh, 880px)`, is portalled to the body so the board's scroll box cannot clip it, and folds into a single column under 720px. The stage list spans the full width, and the document preview grows with the window instead of being capped at 260px.
+
 ## [1.19.1] - 2026-11-10
 
 ### Changed

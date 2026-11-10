@@ -1533,7 +1533,7 @@ window.__ModuleLoader__.load({
           stages.length > 0
             ? h(
                 'section',
-                { className: 'tc-group' },
+                { className: 'tc-group tc-group-stages' },
                 h('span', { className: 'tc-group-title' }, t('groupStages')),
                 h(
                   'ol',
@@ -2403,6 +2403,64 @@ window.__ModuleLoader__.load({
                 ),
               )
 
+      const editor =
+        openTask === null
+          ? null
+          : h(TaskEditor, {
+              key: openTask.id,
+              t,
+              task: openTask,
+              subtasks: openSubtasks,
+              tasks,
+              workspaces,
+              permissions,
+              globalPreset: runner !== null && typeof runner.preset === 'string' ? runner.preset : defaultPreset,
+              onCreateWorkspace: createWorkspace,
+              onClose: () => setOpenId(''),
+              onPatch: patchOpen,
+              onCreateSubtask: async (title) => {
+                if (openTask.parentId !== null) {
+                  setNotice({ kind: 'error', text: t('subtaskOnlyOneLevel') })
+                  return
+                }
+                const ok = await mutate('create', { title, parentId: openTask.id, status: 'todo' })
+                if (ok) setNotice({ kind: 'ok', text: t('noticeCreated') })
+              },
+              onToggleSubtask: (child) => {
+                void mutate('update', { id: child.id, status: child.status === 'done' ? 'todo' : 'done' })
+              },
+              onDeleteSubtask: (id) => {
+                void mutate('delete', { id })
+              },
+              onOpenTask: (id) => setOpenId(id),
+              onStageAction: stageAction,
+              onStageCheck: stageCheck,
+              onStageDoc: stageDoc,
+              onDelete: deleteTask,
+            })
+
+      // A dialog, not a drawer: it centres itself, sizes to the viewport and
+      // escapes the board's scroll box, so a long stage list has room to breathe.
+      const overlay =
+        editor === null
+          ? null
+          : typeof document !== 'undefined' && document.body != null && createPortal !== null
+            ? createPortal(
+                h(
+                  'div',
+                  { className: 'tc-overlay' },
+                  h('div', { className: 'tc-scrim', 'aria-hidden': true, onClick: () => setOpenId('') }),
+                  editor,
+                ),
+                document.body,
+              )
+            : h(
+                'div',
+                { className: 'tc-overlay tc-overlay-inline' },
+                h('div', { className: 'tc-scrim', 'aria-hidden': true, onClick: () => setOpenId('') }),
+                editor,
+              )
+
       return h(
         'div',
         { className: 'tc-root' },
@@ -2544,47 +2602,8 @@ window.__ModuleLoader__.load({
           banner.length === 0 ? null : h('div', { className: 'tc-banner' }, banner),
         ),
         h('div', { className: 'tc-body' }, body),
-        openTask === null
-          ? null
-          : h('div', {
-              className: 'tc-scrim',
-              'aria-hidden': true,
-              onClick: () => setOpenId(''),
-            }),
-        openTask === null
-          ? null
-          : h(TaskEditor, {
-              key: openTask.id,
-              t,
-              task: openTask,
-              subtasks: openSubtasks,
-              tasks,
-              workspaces,
-              permissions,
-              globalPreset: runner !== null && typeof runner.preset === 'string' ? runner.preset : defaultPreset,
-              onCreateWorkspace: createWorkspace,
-              onClose: () => setOpenId(''),
-              onPatch: patchOpen,
-              onCreateSubtask: async (title) => {
-                if (openTask.parentId !== null) {
-                  setNotice({ kind: 'error', text: t('subtaskOnlyOneLevel') })
-                  return
-                }
-                const ok = await mutate('create', { title, parentId: openTask.id, status: 'todo' })
-                if (ok) setNotice({ kind: 'ok', text: t('noticeCreated') })
-              },
-              onToggleSubtask: (child) => {
-                void mutate('update', { id: child.id, status: child.status === 'done' ? 'todo' : 'done' })
-              },
-              onDeleteSubtask: (id) => {
-                void mutate('delete', { id })
-              },
-              onOpenTask: (id) => setOpenId(id),
-              onStageAction: stageAction,
-              onStageCheck: stageCheck,
-              onStageDoc: stageDoc,
-              onDelete: deleteTask,
-            }),
+        overlay,
+
         notice === null
           ? null
           : h('div', { className: 'tc-notice' + (notice.kind === 'error' ? ' tc-notice-error' : '') }, notice.text),
@@ -2790,14 +2809,18 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-col-empty .tc-empty-icon{width:18px;height:18px}
 
 /* ---------------------------------------------------------------- drawer */
-.tc-scrim{position:absolute;inset:0;background:color-mix(in srgb,var(--dsw-alias-bg-base) 58%,transparent);z-index:5;animation:tc-fade-in .16s ease-out}
-.tc-drawer{position:absolute;top:0;right:0;bottom:0;width:min(400px,94%);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);border-left:1px solid var(--dsw-alias-border-l2);z-index:6;animation:tc-slide-in .18s ease-out}
-@keyframes tc-slide-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.tc-overlay{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:24px}
+.tc-overlay-inline{position:absolute;z-index:6}
+.tc-overlay .tc-scrim{position:absolute;inset:0;background:color-mix(in srgb,var(--dsw-alias-bg-base) 58%,transparent);animation:tc-fade-in .16s ease-out}
+.tc-drawer{position:relative;display:flex;flex-direction:column;width:min(1040px,92vw);max-height:min(88vh,880px);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;overflow:hidden;animation:tc-modal-in .18s ease-out}
+@keyframes tc-modal-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+@media (max-width:720px){.tc-overlay{padding:10px}.tc-drawer{width:96vw;max-height:92vh;border-radius:10px}.tc-drawer-body{grid-template-columns:minmax(0,1fr)}}
 @keyframes tc-fade-in{from{opacity:0}to{opacity:1}}
 .tc-drawer-head{display:flex;align-items:center;gap:6px;padding:12px 12px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .tc-drawer-title{flex:1 1 auto;min-width:0;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;font-weight:600;line-height:1.4;padding:4px 5px;border-radius:7px;outline:none}
 .tc-drawer-title:focus{background:var(--dsw-alias-bg-base);outline:1px solid var(--dsw-alias-border-l2);outline-offset:-1px}
-.tc-drawer-body{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:12px}
+.tc-drawer-body{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-content:start;gap:12px;padding:14px}
+.tc-group-stages{grid-column:1/-1}
 .tc-drawer-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l1)}
 .tc-drawer-foot .tc-btn{margin-left:auto}
 
@@ -2836,7 +2859,7 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-out{margin:4px 0 0;padding:6px;max-height:180px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-layer-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
 .tc-btn-quiet{background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}
 .tc-btn-quiet:hover{color:var(--dsw-alias-label-primary)}
-.tc-doc{margin:0;max-height:260px;overflow:auto;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.tc-doc{margin:0;max-height:min(46vh,420px);overflow:auto;padding:8px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 .tc-field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .tc-field-row{display:flex;gap:10px}
 .tc-field-half{flex:1 1 0;min-width:0}
@@ -2894,7 +2917,7 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 /* ------------------------------------------------------------ responsive */
 @media (max-width:960px){.tc-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:640px){.tc-board{grid-template-columns:minmax(0,1fr)}}
-@media (prefers-reduced-motion:reduce){.tc-card,.tc-drawer,.tc-scrim,.tc-notice{transition:none;animation:none}.tc-card:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.tc-card,.tc-drawer,.tc-scrim,.tc-overlay,.tc-notice{transition:none;animation:none}.tc-card:hover{transform:none}}
 `
 
 

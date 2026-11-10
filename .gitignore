@@ -21,3 +21,4 @@ Thumbs.db
 
 # real-browser bundle
 test/.live-build/
+.panel-shot.png

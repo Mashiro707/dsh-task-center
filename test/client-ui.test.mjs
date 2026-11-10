@@ -60,7 +60,7 @@ test('every requested visual affordance is present', () => {
     ['due overdue tone', /\.tc-tone-late\{[^}]*state-error-primary/],
     ['due today tone', /\.tc-tone-today\{[^}]*state-warn-primary/],
     ['search icon', /\.tc-search-icon\{/],
-    ['drawer slide in', /@keyframes tc-slide-in\{from\{transform:translateX\(100%\)/],
+    ['dialog opens', /@keyframes tc-modal-in\{from\{opacity:0;transform:translateY\(10px\)/],
     ['field groups', /\.tc-group\{/],
     ['list rows for trash', /\.tc-row\{/],
     ['focus ring', /:focus-visible\{outline:2px solid var\(--dsw-alias-brand-primary\)/],
@@ -290,4 +290,13 @@ test('a card shows the estimated context tokens of its run', () => {
   assert.match(text, /\.tc-tokens\{/, 'the chip has its own style')
   assert.match(text, /function formatTokens\(/, 'the count is formatted once')
   assert.match(text, /formatTokens\(run\.tokens\)/, 'it reads the run, not the task')
+})
+
+test('the editor opens as a sized dialog, not a cramped drawer', () => {
+  const text = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(text, /\.tc-overlay\{position:fixed;inset:0;z-index:80;display:grid;place-items:center/, 'the overlay centres a fixed dialog')
+  assert.match(text, /\.tc-drawer\{position:relative;display:flex;flex-direction:column;width:min\(1040px,92vw\);max-height:min\(88vh,880px\)/, 'the panel sizes itself to the viewport')
+  assert.match(text, /@keyframes tc-modal-in\{/, 'it fades and lifts in')
+  assert.match(text, /\.tc-group-stages\{grid-column:1\/-1\}/, 'the stage list spans the dialog')
+  assert.match(text, /createPortal\(/, 'it is portalled out of the scroll box')
 })

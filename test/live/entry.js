@@ -30,6 +30,7 @@ const plugin = window.__factory((id) => {
   return null
 })
 const registered = []
+const dictionaries = {}
 const ctx = {
   slots: {
     inject: (_name, run) => run(),
@@ -38,7 +39,20 @@ const ctx = {
       return () => {}
     },
   },
-  locale: { register: () => {}, bind: () => (key) => key },
+  // The real host keeps the dictionary the panel registers and resolves keys for
+  // the active language; this does the same so a screenshot shows words, not keys.
+  locale: {
+    register: (namespace, dictionary) => {
+      dictionaries[namespace] = dictionary
+    },
+    bind: (namespace) => (key, params) => {
+      const dictionary = dictionaries[namespace] || {}
+      const table = dictionary.zh || dictionary.en || {}
+      const text = table[key] === undefined ? key : table[key]
+      if (params === undefined || text.indexOf('{') < 0) return text
+      return text.replace(/\{(\w+)\}/g, (whole, name) => (params[name] === undefined ? whole : String(params[name])))
+    },
+  },
   get: () => undefined,
 }
 plugin.apply(ctx)

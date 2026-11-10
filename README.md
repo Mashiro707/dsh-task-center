@@ -204,6 +204,7 @@ client.js               同上
 - **结束时看事件，不看返回值**：`followup()` 只是入队，真正的完成信号是 `agent/status` 从 `running` 翻走，或 `agent/error`。
 - **工作区而不是裸目录**：`sessionController.create({ workspaceId })` 由宿主把目录、会话归属和工作区记录一起处理，插件不用自己拼 cwd；`cwd` 只作为没有工作区时的兼容兜底。
 - **权限是任务级覆盖**：预设通过 `permissionPresets.set(session, name)` 落在会话上，所以「这个任务用这套权限」不会污染全局设置。
+- **任务详情是弹窗**：居中、按视口自适应（移动端 96vw / 92vh），portal 到 `document.body`，所以看板的滚动容器裁不到它；阶段列表横跨整宽，文档预览最高 `min(46vh, 420px)`。
 - **两层浏览器测试**：`test/browser.test.mjs` 用 jsdom + 真实 React 挂起面板点流程（进 CI，抓白屏与事件绑定）；`test/live-browser.test.mjs` 用 Windows 自带的 Edge 跑真排版（`DSH_LIVE_BROWSER=1 npm run test:browser`），断言四列等宽、卡片 10px 圆角、12/13px 字号、下拉列表 `position: fixed`、无横向溢出——这些 jsdom 看不见。
 - **浏览器半也有端到端测试**：`test/browser.test.mjs` 把真实的 `client.js` 装进 jsdom、用 React 挂载面板并用点击驱动，覆盖「四列渲染、卡片开抽屉、开跑按钮发请求」；`jsdom` / `react` / `react-dom` 只是开发期依赖，发布包仍然零运行时依赖。
 - **崩溃不留白屏**：浏览器半套了一层错误边界，渲染异常会显示堆栈，并以一张 `[client-error]` 开头的阻塞任务写到看板上——面板一旦崩过，下次就能在任务里看到原因。
