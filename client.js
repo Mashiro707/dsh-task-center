@@ -1253,7 +1253,7 @@ window.__ModuleLoader__.load({
                 'aria-label': t('field.title'),
                 onChange: (event) => stage({ title: event.target.value }),
                 onBlur: flush,
-            }), h('button', { type: 'button', className: 'tc-iconbtn', title: t('close'), 'aria-label': t('close'), onClick: props.onClose }, '\u00d7')), h('div', { className: 'tc-drawer-body' }, h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupSchedule')), h('div', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.status')), h('div', { className: 'tc-seg' }, COLUMNS.map((id) => h('button', {
+            }), h('button', { type: 'button', className: 'tc-iconbtn', title: t('close'), 'aria-label': t('close'), onClick: props.onClose }, '\u00d7')), h('div', { className: 'tc-drawer-body' }, h('div', { className: 'tc-fields' }, h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupSchedule')), h('div', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.status')), h('div', { className: 'tc-seg' }, COLUMNS.map((id) => h('button', {
                 key: id,
                 type: 'button',
                 className: 'tc-seg-btn' + (form.status === id ? ' tc-seg-on' : ''),
@@ -1318,7 +1318,40 @@ window.__ModuleLoader__.load({
                 className: 'tc-switch-check',
                 checked: form.autoApprove,
                 onChange: (event) => stage({ autoApprove: event.target.checked }),
-            }), h('span', { className: 'tc-switch-track' }, h('span', { className: 'tc-switch-dot' })), h('span', { className: 'tc-switch-text' }, form.autoApprove ? t('autoApproveOn') : t('autoApproveOff'))), h('span', { className: 'tc-fieldhint' }, t('autoApproveHint')))), stages.length > 0
+            }), h('span', { className: 'tc-switch-track' }, h('span', { className: 'tc-switch-dot' })), h('span', { className: 'tc-switch-text' }, form.autoApprove ? t('autoApproveOn') : t('autoApproveOff'))), h('span', { className: 'tc-fieldhint' }, t('autoApproveHint')))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupDeps')), candidates.length === 0
+                ? h('p', { className: 'tc-fieldhint' }, t('noBlockers'))
+                : h('div', { className: 'tc-blockers' }, candidates.map((candidate) => {
+                    const checked = form.blockedBy.indexOf(candidate.id) !== -1;
+                    return h('label', {
+                        key: candidate.id,
+                        className: 'tc-blocker' + (checked ? ' tc-blocker-on' : ''),
+                    }, h('input', {
+                        type: 'checkbox',
+                        className: 'tc-blocker-check',
+                        checked,
+                        onChange: () => {
+                            const next = checked
+                                ? form.blockedBy.filter((entry) => entry !== candidate.id)
+                                : form.blockedBy.concat([candidate.id]);
+                            stage({ blockedBy: next });
+                        },
+                    }), h('span', { className: 'tc-blocker-title' }, candidate.title), candidate.status === 'done'
+                        ? h('span', { className: 'tc-blocker-done' }, t('column.done'))
+                        : null);
+                })), h('span', { className: 'tc-fieldhint' }, t('blockersHint'))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupContent')), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.tags')), h('input', {
+                className: 'tc-input',
+                value: form.tags,
+                placeholder: t('tagsPlaceholder'),
+                onChange: (event) => stage({ tags: event.target.value }),
+                onBlur: flush,
+            })), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.notes')), h('textarea', {
+                className: 'tc-input tc-textarea',
+                value: form.notes,
+                rows: 4,
+                placeholder: t('notesPlaceholder'),
+                onChange: (event) => stage({ notes: event.target.value }),
+                onBlur: flush,
+            })))), stages.length > 0
                 ? h('section', { className: 'tc-group tc-group-stages' }, h('span', { className: 'tc-group-title' }, t('groupStages')), h('ol', { className: 'tc-stagelist' }, stages.map((entry, index) => {
                     const awaiting = entry.status === 'awaiting-approval';
                     const current = index === stageIndex;
@@ -1390,40 +1423,7 @@ window.__ModuleLoader__.load({
                 })), h('span', { className: 'tc-fieldhint' }, t('stageHint')), doc === null
                     ? null
                     : h('div', { className: 'tc-doc tc-md' }, doc.text.trim() === '' ? t('docEmpty') : renderMarkdown(doc.text)))
-                : null, h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupDeps')), candidates.length === 0
-                ? h('p', { className: 'tc-fieldhint' }, t('noBlockers'))
-                : h('div', { className: 'tc-blockers' }, candidates.map((candidate) => {
-                    const checked = form.blockedBy.indexOf(candidate.id) !== -1;
-                    return h('label', {
-                        key: candidate.id,
-                        className: 'tc-blocker' + (checked ? ' tc-blocker-on' : ''),
-                    }, h('input', {
-                        type: 'checkbox',
-                        className: 'tc-blocker-check',
-                        checked,
-                        onChange: () => {
-                            const next = checked
-                                ? form.blockedBy.filter((entry) => entry !== candidate.id)
-                                : form.blockedBy.concat([candidate.id]);
-                            stage({ blockedBy: next });
-                        },
-                    }), h('span', { className: 'tc-blocker-title' }, candidate.title), candidate.status === 'done'
-                        ? h('span', { className: 'tc-blocker-done' }, t('column.done'))
-                        : null);
-                })), h('span', { className: 'tc-fieldhint' }, t('blockersHint'))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('groupContent')), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.tags')), h('input', {
-                className: 'tc-input',
-                value: form.tags,
-                placeholder: t('tagsPlaceholder'),
-                onChange: (event) => stage({ tags: event.target.value }),
-                onBlur: flush,
-            })), h('label', { className: 'tc-field' }, h('span', { className: 'tc-label' }, t('field.notes')), h('textarea', {
-                className: 'tc-input tc-textarea',
-                value: form.notes,
-                rows: 4,
-                placeholder: t('notesPlaceholder'),
-                onChange: (event) => stage({ notes: event.target.value }),
-                onBlur: flush,
-            }))), h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('subtasks')), h('div', { className: 'tc-sublist' }, props.subtasks.length === 0
+                : null, h('section', { className: 'tc-group' }, h('span', { className: 'tc-group-title' }, t('subtasks')), h('div', { className: 'tc-sublist' }, props.subtasks.length === 0
                 ? h('p', { className: 'tc-hint' }, t('subtaskAdd'))
                 : props.subtasks.map((child) => h('div', { key: child.id, className: 'tc-subrow' }, h('button', {
                     type: 'button',
@@ -2280,15 +2280,15 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-overlay{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:24px}
 .tc-overlay-inline{position:absolute;z-index:6}
 .tc-overlay .tc-scrim{position:absolute;inset:0;background:color-mix(in srgb,var(--dsw-alias-bg-base) 58%,transparent);animation:tc-fade-in .16s ease-out}
-.tc-drawer{position:relative;display:flex;flex-direction:column;width:min(1040px,92vw);max-height:min(88vh,880px);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;overflow:hidden;animation:tc-modal-in .18s ease-out}
+.tc-drawer{position:relative;display:flex;flex-direction:column;width:min(1180px,94vw);max-height:min(88vh,880px);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;overflow:hidden;animation:tc-modal-in .18s ease-out}
 @keyframes tc-modal-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
-@media (max-width:720px){.tc-overlay{padding:10px}.tc-drawer{width:96vw;max-height:92vh;border-radius:10px}.tc-drawer-body{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:720px){.tc-overlay{padding:10px}.tc-drawer{width:96vw;max-height:92vh;border-radius:10px}.tc-fields{grid-template-columns:minmax(0,1fr)}}
 @keyframes tc-fade-in{from{opacity:0}to{opacity:1}}
 .tc-drawer-head{display:flex;align-items:center;gap:6px;padding:12px 12px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .tc-drawer-title{flex:1 1 auto;min-width:0;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;font-weight:600;line-height:1.4;padding:4px 5px;border-radius:7px;outline:none}
 .tc-drawer-title:focus{background:var(--dsw-alias-bg-base);outline:1px solid var(--dsw-alias-border-l2);outline-offset:-1px}
-.tc-drawer-body{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-content:start;gap:12px;padding:14px}
-.tc-group-stages{grid-column:1/-1}
+.tc-drawer-body{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:14px}
+.tc-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));align-content:start;align-items:start;gap:12px}
 .tc-drawer-foot{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l1)}
 .tc-drawer-foot .tc-btn{margin-left:auto}
 

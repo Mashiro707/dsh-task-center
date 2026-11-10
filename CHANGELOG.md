@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-11-10
+
+### Fixed
+
+- The task dialog no longer leaves a hole. The stage list used to live in the same grid as the three field groups and, being full width, forced the remaining groups onto the next row, so one narrow column stood alone beside several hundred pixels of empty space. The field groups now share a grid of their own, and the stage list and subtasks follow as full-width sections.
+- The dialog adapts to the window: three columns around 1100px, two around 800px, one at 720px and below; the panel is `min(1180px, 94vw)` wide.
+
 ## [1.21.0] - 2026-11-10
 
 ### Added
