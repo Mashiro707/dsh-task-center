@@ -268,6 +268,45 @@ test('the run button posts to the run route', async () => {
   }
 })
 
+test('the stage row lists the document steps instead of a summary', async () => {
+  const steps = ['\u5148\u8bfb http.go', '\u518d\u8865 Handler', '\u6700\u540e\u8dd1 go test']
+  const panel = await mount({
+    list: board([
+      task('t1', 'doing', '\u5199\u6587\u6863', {
+        workspacePath: 'C:/work',
+        stages: [
+          {
+            index: 0,
+            title: '\u5206\u652f\u4e0e\u5de5\u7a0b\u5e95\u5ea7',
+            goal: 'g',
+            steps,
+            docPath: 'docs/a.md',
+            scope: [],
+            verify: ['test -f a'],
+            status: 'awaiting-approval',
+            message: null,
+            output: null,
+            startedAt: 1,
+            endedAt: null,
+          },
+        ],
+        stageIndex: 0,
+      }),
+    ]),
+    workspaces: [],
+    permissions: { options: [], available: false },
+    settings: { autoRun: false, concurrency: 2, available: false },
+  })
+  try {
+    const card = panel.container.querySelector('.tc-card')
+    await panel.click(card)
+    const items = [...panel.document.querySelectorAll('.tc-stage-steps li')].map((node) => node.textContent)
+    assert.deepEqual(items, steps, 'every step is on screen, in the document order')
+  } finally {
+    panel.dispose()
+  }
+})
+
 test('a rejected stage offers to run again from its own row', async () => {
   const panel = await mount({
     list: board([

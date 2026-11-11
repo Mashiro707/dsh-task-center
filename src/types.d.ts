@@ -50,6 +50,8 @@ interface TaskStage {
   index: number
   title: string
   goal: string
+  /** The document's numbered steps, verbatim: the UI lists these, never a summary. */
+  steps: string[]
   /** Workspace-relative POSIX path: docs/task-center/<taskId>/stage-<n>.md */
   docPath: string
   /** Files or directories the agent may touch; relative to the workspace or absolute. */

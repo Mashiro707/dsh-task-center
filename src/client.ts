@@ -1777,6 +1777,13 @@ function TaskCard(props) {
                         { className: 'tc-stage-pill tc-stage-' + String(entry.status).replace(/-/g, '') },
                         stageLabel[entry.status] === undefined ? String(entry.status) : stageLabel[entry.status],
                       ),
+                      entry.steps !== undefined && entry.steps.length > 0
+                        ? h(
+                            'ol',
+                            { className: 'tc-stage-steps' },
+                            entry.steps.map((line, position) => h('li', { key: String(position) }, line)),
+                          )
+                        : null,
                       h(
                         'span',
                         { className: 'tc-stage-acts' },
@@ -3026,6 +3033,8 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-pill.tc-stage-failed{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
 .tc-stage-pill.tc-stage-done{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 38%,transparent)}
 .tc-stage-acts{flex:0 0 auto;display:inline-flex;gap:4px}
+.tc-stage-steps{flex:1 0 100%;margin:2px 0 0;padding:0 0 0 20px;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary)}
+.tc-stage-steps li{margin-top:2px}
 .tc-reject{flex:1 0 100%;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:6px}
 .tc-reject-input{width:100%;min-height:52px;resize:vertical;line-height:1.5;padding:6px 9px}
 .tc-reject-acts{display:flex;justify-content:flex-end;gap:6px}

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.0] - 2026-11-11
+
+### Added
+
+- A stage keeps the document's numbered steps as data (`stages[].steps`) and the dialog lists them verbatim under the stage title. The planner writes them once; the document and the panel render the same array, so nothing is summarised, shortened or re-worded on the way to the screen.
+
 ## [1.26.1] - 2026-11-10
 
 ### Fixed

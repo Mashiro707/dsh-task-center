@@ -225,6 +225,37 @@ test('concurrent creates all survive', async () => {
   }
 })
 
+test('a stage keeps its steps verbatim', async () => {
+  const { store, dispose } = await makeStore()
+  try {
+    const created = await store.create({ title: '步骤', cwd: 'C:/work' })
+    const steps = ['先读 http.go', '再补 Handler', '最后跑 go test']
+    await store.update({
+      id: created.id,
+      stageIndex: 0,
+      stages: [
+        {
+          title: '一',
+          goal: 'g',
+          steps,
+          docPath: '',
+          scope: [],
+          verify: ['test -f a'],
+          status: 'awaiting-approval',
+          message: null,
+          output: null,
+          startedAt: 1,
+          endedAt: null,
+        },
+      ],
+    })
+    const row = (await store.list()).tasks.find((entry) => entry.id === created.id)
+    assert.deepEqual(row.stages[0].steps, steps, 'the same lines come back, in order and unchanged')
+  } finally {
+    await dispose()
+  }
+})
+
 test('two stores on one file see each other', async () => {
   const { store, dataFile, dispose } = await makeStore()
   try {
