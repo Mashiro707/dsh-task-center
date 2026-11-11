@@ -108,3 +108,30 @@ export function checkVerifyCommands(
   }
   return { errors, warnings }
 }
+
+/**
+ * Naming where the contract lives is what keeps a stage from inventing field
+ * names: a document that says "see the API document" cannot be checked against
+ * anything.
+ * @param {{ contract?: string; steps?: string[] }} stage - the stage to screen.
+ * @returns {{ errors: string[]; warnings: string[] }} what blocks approval.
+ */
+export function checkStageContract(stage: { contract?: string; steps?: string[] }): {
+  errors: string[]
+  warnings: string[]
+} {
+  const errors: string[] = []
+  const warnings: string[] = []
+  const contract = typeof stage.contract === 'string' ? stage.contract.trim() : ''
+  const steps = Array.isArray(stage.steps)
+    ? stage.steps.filter((entry) => typeof entry === 'string' && entry.trim() !== '')
+    : []
+  if (contract === '') {
+    errors.push('没有写明契约来源：字段名、错误码以规格的哪一节为准（例如 4.2.30 / 4.2.16）')
+  } else if (!/\d+\.\d+(\.\d+)*/.test(contract)) {
+    errors.push('契约来源要写到条款号（例如 4.2.30），只写「接口文档」没法核对')
+  }
+  if (steps.length === 0) errors.push('没有步骤：文档要逐条写清这一步做什么，不能只给一句目标')
+  else if (steps.length < 2) warnings.push('只有一个步骤，确认这确实是一件事')
+  return { errors, warnings }
+}

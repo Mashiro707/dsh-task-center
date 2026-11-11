@@ -53,6 +53,9 @@ export function renderStageDoc(stage, ordinal, taskTitle) {
     const scope = stage.scope.length === 0
         ? '_（未声明允许改动；执行阶段只能读取，任何写入都会被拒绝。）_'
         : stage.scope.map(entry => `- \`${entry}\``).join('\n');
+    const contract = stage.contract.trim() === ''
+        ? '_（未声明契约来源：字段名与错误码以哪一节为准。）_'
+        : stage.contract.trim();
     const steps = stage.steps.length === 0
         ? '_（未给出步骤。）_'
         : stage.steps.map((entry, index) => `${index + 1}. ${entry}`).join('\n');
@@ -72,6 +75,10 @@ export function renderStageDoc(stage, ordinal, taskTitle) {
         '## 允许改动',
         '',
         scope,
+        '',
+        '## 契约',
+        '',
+        contract,
         '',
         '## 步骤',
         '',

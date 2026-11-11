@@ -595,7 +595,7 @@ test('reconcile also clears a stage left running by a dead run', async () => {
       id: task.id,
       stageIndex: 0,
       stages: [
-        { title: '一', goal: 'g', docPath: '', scope: [], verify: ['test -f a'], status: 'running', message: null, output: null, startedAt: 1, endedAt: null },
+        { title: '一', goal: 'g', contract: '4.2.30', steps: ['先读代码'], docPath: '', scope: [], verify: ['test -f a'], status: 'running', message: null, output: null, startedAt: 1, endedAt: null },
       ],
       run: { sessionId: 'session-gone', status: 'running', startedAt: 1, endedAt: null, message: null },
     })
@@ -619,7 +619,7 @@ test('cancelling a run that no longer exists clears the busy stage', async () =>
       id: task.id,
       stageIndex: 0,
       stages: [
-        { title: '一', goal: 'g', docPath: '', scope: [], verify: ['test -f a'], status: 'running', message: null, output: null, startedAt: 1, endedAt: null },
+        { title: '一', goal: 'g', contract: '4.2.30', steps: ['先读代码'], docPath: '', scope: [], verify: ['test -f a'], status: 'running', message: null, output: null, startedAt: 1, endedAt: null },
       ],
       run: { sessionId: 'session-gone', status: 'failed', startedAt: 1, endedAt: 2, message: '运行中断（Host 或插件已重启）' },
     })
@@ -681,8 +681,8 @@ test('a cursor left on a finished stage moves on by itself', async () => {
       id: task.id,
       stageIndex: 0,
       stages: [
-        { title: '一', goal: 'g', docPath: '', scope: [], verify: [], status: 'done', message: null, output: null, startedAt: 1, endedAt: 2 },
-        { title: '二', goal: 'g', docPath: '', scope: [], verify: [], status: 'draft', message: null, output: null, startedAt: null, endedAt: null },
+        { title: '一', goal: 'g', contract: '4.2.30', steps: ['先读代码'], docPath: '', scope: [], verify: [], status: 'done', message: null, output: null, startedAt: 1, endedAt: 2 },
+        { title: '二', goal: 'g', contract: '4.2.30', steps: ['先读代码'], docPath: '', scope: [], verify: [], status: 'draft', message: null, output: null, startedAt: null, endedAt: null },
       ],
     })
 
@@ -1202,6 +1202,8 @@ async function planOneStage(store, task, workspace, overrides = {}) {
     ...task.stages[0],
     title: overrides.title ?? '改接口',
     scope: overrides.scope ?? ['src'],
+    contract: overrides.contract ?? '4.2.30',
+    steps: overrides.steps ?? ['改代码'],
     verify: overrides.verify ?? ['node --version'],
     docPath: stageRelPath(task.id, 1),
     status: overrides.status ?? 'approved',
@@ -1210,7 +1212,7 @@ async function planOneStage(store, task, workspace, overrides = {}) {
   await writeStageDocs(
     workspace,
     task.id,
-    [{ title: stage.title, goal: '把 A 改成 B', scope: stage.scope, steps: ['改代码'], verify: stage.verify }],
+    [{ title: stage.title, goal: '把 A 改成 B', contract: '4.2.30', scope: stage.scope, steps: ['改代码'], verify: stage.verify }],
     task.title,
   )
   return store.update({ id: task.id, stages: [stage], stageIndex: 0 })
@@ -1445,7 +1447,7 @@ test('a failed stage can be re-checked without running the agent again', async (
     const task = await store.create({
       title: '验收重跑',
       cwd: process.cwd(),
-      stages: [{ title: '第一步', goal: '什么都不做', scope: [], verify: ['node -e "process.exit(0)"'] }],
+      stages: [{ title: '第一步', goal: '什么都不做', contract: '4.2.30', steps: ['先读代码'], scope: [], verify: ['node -e "process.exit(0)"'] }],
       stageIndex: 0,
     })
     await store.update({
@@ -1478,7 +1480,7 @@ test('re-check keeps the stage failed when the command still fails', async () =>
     const task = await store.create({
       title: '验收仍不过',
       cwd: process.cwd(),
-      stages: [{ title: '第一步', goal: '什么都不做', scope: [], verify: ['node -e "process.exit(1)"'] }],
+      stages: [{ title: '第一步', goal: '什么都不做', contract: '4.2.30', steps: ['先读代码'], scope: [], verify: ['node -e "process.exit(1)"'] }],
       stageIndex: 0,
     })
     await store.update({
@@ -1580,11 +1582,31 @@ test('approving a document whose verify commands cannot work is refused', async 
       verify: ['cd repo && ! grep -q TODO repo/main.go'],
     })
 
-    await assert.rejects(() => runner.approveStage(task.id), /验收命令有问题/)
+    await assert.rejects(() => runner.approveStage(task.id), /文档还不完整/)
     const row = (await store.list()).tasks.find(entry => entry.id === task.id)
     assert.equal(row.stages[0].status, 'awaiting-approval', 'the stage stays where the user can reject it')
-    assert.match(String(row.stages[0].message), /验收命令有问题/)
+    assert.match(String(row.stages[0].message), /文档还不完整/)
     assert.equal(host.created.length, 0, 'no agent was started for a document we do not trust')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a stage without a contract is not approved', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '没契约', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { status: 'awaiting-approval', contract: '' })
+
+    await assert.rejects(() => runner.approveStage(task.id), /文档还不完整/)
+    const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+    assert.equal(row.stages[0].status, 'awaiting-approval', 'it stays reviewable')
+    assert.match(String(row.stages[0].message), /契约来源/)
+    assert.equal(host.created.length, 0, 'no agent runs on a document that cannot be checked')
   } finally {
     await dispose()
   }

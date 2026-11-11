@@ -10,6 +10,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A stage keeps the document's numbered steps as data (`stages[].steps`) and the dialog lists them verbatim under the stage title. The planner writes them once; the document and the panel render the same array, so nothing is summarised, shortened or re-worded on the way to the screen.
 
+## [1.27.0] - 2026-11-11
+
+### Added
+
+- Every stage document carries a **contract** section: the spec clause the field names, error codes and payloads must follow (`4.2.30 / 4.2.16，字段名以该节为准`). `task_stage_plan` requires it, so a plan that never read the spec cannot be written down.
+- Approving a document now runs a quality gate first: no contract clause, a contract that names no numbers, or no steps all block the approval and leave the reason on the stage row.
+
+### Why
+
+A stage that only repeats the summary invents field names. The 4.4.0.x sections of the coupon spec are pointers ("见 4.2.30，保持原字段名"), so a document that does not name the clause cannot be checked against it.
+
 ## [1.26.1] - 2026-11-10
 
 ### Fixed

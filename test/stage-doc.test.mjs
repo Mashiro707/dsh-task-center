@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { checkVerifyCommands } from '../stage-doc.js'
+import { checkStageContract, checkVerifyCommands } from '../stage-doc.js'
 
 async function workspace() {
   const dir = await mkdtemp(join(tmpdir(), 'tc-doc-'))
@@ -74,4 +74,25 @@ test('an empty verify list is refused', () => {
 test('a remote root skips the directory existence check', () => {
   const check = checkVerifyCommands(['cd repo && go build ./...'], '/root/go/work', true)
   assert.deepEqual(check.errors, [])
+})
+
+test('a stage without a named contract cannot be approved', () => {
+  const check = checkStageContract({ contract: '', steps: ['读代码'] })
+  assert.equal(check.errors.length, 1)
+  assert.match(check.errors[0], /契约来源/)
+})
+
+test('a contract has to name a clause, not just wave at the document', () => {
+  const vague = checkStageContract({ contract: '接口文档', steps: ['读代码'] })
+  assert.match(vague.errors.join(' '), /条款号/)
+  const named = checkStageContract({ contract: '4.2.30 / 4.2.16，字段名以该节为准', steps: ['读代码', '改代码'] })
+  assert.deepEqual(named.errors, [])
+})
+
+test('a stage without steps is refused, one step only warns', () => {
+  const empty = checkStageContract({ contract: '4.2.30', steps: [] })
+  assert.match(empty.errors.join(' '), /没有步骤/)
+  const single = checkStageContract({ contract: '4.2.30', steps: ['就把这件事做完'] })
+  assert.deepEqual(single.errors, [])
+  assert.equal(single.warnings.length, 1)
 })

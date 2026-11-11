@@ -317,6 +317,7 @@ function draftStage(taskId, title, goal) {
         index: 1,
         title,
         goal,
+        contract: '',
         steps: [],
         docPath: stageDocPath(taskId, 1),
         scope: [],
@@ -355,6 +356,7 @@ function normalizeStage(raw, taskId, position) {
         index: position + 1,
         title,
         goal: typeof source.goal === 'string' ? source.goal : '',
+        contract: typeof source.contract === 'string' ? source.contract : '',
         steps: cleanStringList(source.steps),
         docPath: stageDocPath(taskId, position + 1),
         scope: cleanStringList(source.scope),
@@ -1152,6 +1154,10 @@ function publishTools(ctx, store) {
                                 items: { type: 'string' },
                                 description: 'Files or directories this stage may change, relative to the workspace or absolute.',
                             },
+                            contract: {
+                                type: 'string',
+                                description: 'Where the field-level contract lives: the spec section the field names, error codes and payloads must follow (e.g. "4.2.30 / 4.2.16，字段名以该节为准"). Quote the clause numbers, never write "the API document".',
+                            },
                             steps: { type: 'array', items: { type: 'string' }, description: 'How to get there, in order.' },
                             verify: {
                                 type: 'array',
@@ -1159,7 +1165,7 @@ function publishTools(ctx, store) {
                                 description: 'Commands that must exit 0 before the stage counts as done.',
                             },
                         },
-                        required: ['title', 'goal', 'verify'],
+                        required: ['title', 'goal', 'contract', 'verify'],
                         additionalProperties: false,
                     },
                 },
@@ -1193,21 +1199,26 @@ function publishTools(ctx, store) {
                 const title = typeof source.title === 'string' ? source.title.trim() : '';
                 const goal = typeof source.goal === 'string' ? source.goal.trim() : '';
                 const scope = cleanStringList(source.scope);
+                const contract = typeof source.contract === 'string' ? source.contract.trim() : '';
                 const steps = cleanStringList(source.steps);
                 const verify = cleanStringList(source.verify);
                 if (title === '')
                     throw storeError('bad-request', `第 ${position + 1} 个阶段缺少标题。`);
                 if (goal === '')
                     throw storeError('bad-request', `第 ${position + 1} 个阶段缺少目标。`);
+                if (contract === '') {
+                    throw storeError('bad-request', `第 ${position + 1} 个阶段没有写明契约来源：字段名、错误码以规格的哪一节为准（例如 4.2.30 / 4.2.16）。`);
+                }
                 if (verify.length === 0)
                     throw storeError('bad-request', `第 ${position + 1} 个阶段没有验收命令。`);
-                parsed.push({ title, goal, scope, steps, verify });
+                parsed.push({ title, goal, contract, scope, steps, verify });
             }
             await writeStageDocs(root, taskId, parsed, task.title);
             const stages = parsed.map((entry, position) => ({
                 index: position + 1,
                 title: entry.title,
                 goal: entry.goal,
+                contract: entry.contract,
                 steps: entry.steps,
                 docPath: stageRelPath(taskId, position + 1),
                 scope: entry.scope,

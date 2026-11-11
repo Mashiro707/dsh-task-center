@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js';
-import { checkVerifyCommands } from './stage-doc.js';
+import { checkStageContract, checkVerifyCommands } from './stage-doc.js';
 import { currentStage, readStageDoc, stageAbsPath } from './stages.js';
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js';
 import { pickRepo, removeWorktreeCommands, worktreeBranch, worktreeIsDirty, worktreePath } from './worktree.js';
@@ -1700,11 +1700,12 @@ export function createRunner(ctx, store) {
                 throw runnerError('not-awaiting', `阶段 ${stage.index} 现在是 ${stage.status}，不用批准。`);
             }
             const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined);
-            if (check.errors.length > 0) {
-                await patchStage(taskId, stage.index, {
-                    message: `验收命令有问题：${check.errors.join('；')}`,
-                });
-                throw runnerError('stage-doc-invalid', `验收命令有问题：${check.errors.join('；')}`);
+            const contract = checkStageContract(stage);
+            const problems = [...contract.errors, ...check.errors];
+            if (problems.length > 0) {
+                const message = `文档还不完整：${problems.join('；')}`;
+                await patchStage(taskId, stage.index, { message });
+                throw runnerError('stage-doc-invalid', message);
             }
             const stages = task.stages.map((entry, index) => index === position ? { ...entry, status: 'approved', message: null } : entry);
             const approved = await store.update({ id: taskId, stages, stageIndex: position });
@@ -1741,7 +1742,12 @@ export function createRunner(ctx, store) {
             if (stage === undefined)
                 throw runnerError('no-stage', `任务没有第 ${position + 1} 个阶段。`);
             const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined);
-            return { errors: check.errors, warnings: check.warnings, commands: stage.verify };
+            const contract = checkStageContract(stage);
+            return {
+                errors: [...contract.errors, ...check.errors],
+                warnings: [...contract.warnings, ...check.warnings],
+                commands: stage.verify,
+            };
         },
         async reverify(taskId) {
             const board = await store.list();

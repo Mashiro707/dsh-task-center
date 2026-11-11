@@ -51,6 +51,8 @@ interface TaskStage {
   title: string
   goal: string
   /** The document's numbered steps, verbatim: the UI lists these, never a summary. */
+  /** Where the field-level contract comes from, e.g. `4.2.30`. */
+  contract: string
   steps: string[]
   /** Workspace-relative POSIX path: docs/task-center/<taskId>/stage-<n>.md */
   docPath: string
