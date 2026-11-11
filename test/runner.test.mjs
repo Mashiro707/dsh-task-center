@@ -1592,6 +1592,33 @@ test('approving a document whose verify commands cannot work is refused', async 
   }
 })
 
+test('the task is not done until its acceptance commands pass', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '终验', workspacePath: workspace, acceptance: ['exit 7'] })
+    await planOneStage(store, task, workspace, { status: 'approved' })
+
+    const run = await runner.start(task.id)
+    const agent = host.agents.get(run.run.sessionId)
+    agent.status = 'idle'
+    host.emit('agent/status', { agent, status: 'idle' })
+
+    const row = await waitFor(async () => {
+      const board = await store.list()
+      const found = board.tasks.find(entry => entry.id === task.id)
+      return found !== undefined && found.status !== 'doing' ? found : null
+    })
+    assert.equal(row.status, 'blocked', 'a failing final check keeps the task open')
+    assert.match(row.notes, /\[终验\] 没通过/, 'the row says the final check failed')
+  } finally {
+    await dispose()
+  }
+})
+
 test('a stage without a contract is not approved', async () => {
   const { dir, store, dispose } = await makeStore()
   try {

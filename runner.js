@@ -919,18 +919,74 @@ export function createRunner(ctx, store) {
             return entry;
         });
         const finished = nextIndex >= stages.length;
+        if (finished && (current.acceptance ?? []).length > 0) {
+            // The stages are done; the task is not, until the commands the user asked
+            // for at the end (unit, smoke, integration) actually pass.
+            await store.update({ id: current.id, stages, stageIndex: current.stageIndex });
+            const outcome = await runAcceptance(current);
+            if (!outcome.ok) {
+                await store.update({ id: current.id, status: 'blocked' });
+                await appendTaskNote(current.id, `[终验] 没通过：${outcome.message}`);
+                note(`acceptance failed: ${outcome.message}`);
+                return;
+            }
+            await store.update({ id: current.id, status: 'done' });
+            await appendTaskNote(current.id, `[终验] 通过（${outcome.count} 条命令）`);
+            note('acceptance passed');
+            if ((current.workdir ?? '') !== '') {
+                void releaseTaskWorktree(current.id).catch(error => note(`worktree kept: ${describe(error)}`));
+            }
+            return;
+        }
         await store.update({
             id: current.id,
             stages,
             stageIndex: finished ? current.stageIndex : Math.max(current.stageIndex, nextIndex),
             ...(finished ? { status: 'done' } : {}),
         });
+        if (finished && (current.acceptance ?? []).length === 0) {
+            await appendTaskNote(current.id, '[终验] 没有声明任务级验收命令，跳过。');
+        }
         note(`stage ${stage.index} done`);
         if (finished && (current.workdir ?? "") !== "") {
             void releaseTaskWorktree(current.id).catch(error => note(`worktree kept: ${describe(error)}`));
         }
         if (!finished)
             ctx.logger?.info?.(`[task-center] 阶段 ${stage.index} 验收通过，下一步等批准。`);
+    }
+    /**
+     * Append one line to the task notes.
+     * @param {string} taskId - the task.
+     * @param {string} line - the line to append.
+     * @returns {Promise<void>} resolves once written.
+     */
+    async function appendTaskNote(taskId, line) {
+        const board = await store.list();
+        const task = board.tasks.find(entry => entry.id === taskId);
+        if (task === undefined)
+            return;
+        const notes = task.notes.trim() === '' ? line : `${task.notes.trim()}\n${line}`;
+        await store.update({ id: taskId, notes });
+    }
+    /**
+     * Run the commands that decide whether the whole task is done.
+     * @param {TaskRecord} task - the task whose list to run.
+     * @returns {Promise<{ ok: boolean; count: number; message: string }>} the outcome.
+     */
+    async function runAcceptance(task) {
+        const commands = task.acceptance ?? [];
+        const root = workspaceRoot(task);
+        if (root === '')
+            return { ok: false, count: commands.length, message: '任务没有工作目录，验收命令没有地方可跑。' };
+        const outcomes = await runVerifyCommands(commands, root, DEFAULT_VERIFY_TIMEOUT_MS, verifyTarget(task));
+        const failed = outcomes.find(entry => !entry.ok);
+        if (failed !== undefined) {
+            const text = failed.error !== null && failed.error !== undefined && failed.error !== ''
+                ? failed.error
+                : failed.output.trim() === '' ? (failed.timedOut ? '超时' : `退出码 ${failed.code}`) : failed.output.trim().split('\n').slice(-3).join(' ');
+            return { ok: false, count: commands.length, message: `${failed.command}：${text}` };
+        }
+        return { ok: true, count: commands.length, message: '' };
     }
     /**
      * Record the end of one attempt, then retry it when the settings allow.

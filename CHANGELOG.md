@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] - 2026-11-11
+
+### Added
+
+- The plan now has to say how the **whole task** is verified: `task_stage_plan` takes a required `acceptance` list of shell commands (unit tests, a smoke run, an integration check). A plan without it is refused.
+- When the last stage is done the runner runs that list. If any command fails the task is left **blocked**, with `[终验] 没通过：<command>：<reason>` appended to its description; the task only becomes done once every command exits 0, and the notes then carry `[终验] 通过（N 条命令）`.
+
+### Why
+
+A staged run used to end when the last stage's own commands passed, so a task whose description says "开发完成后做单元测试、冒烟测试和集成测试" could finish without any of that ever running.
+
 ## [1.27.0] - 2026-11-11
 
 ### Added

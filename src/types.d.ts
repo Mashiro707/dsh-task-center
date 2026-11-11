@@ -92,6 +92,7 @@ interface TaskRecord {
   /** Latest automatic run, or null when the task was never run. */
   run: TaskRun | null
   /** Ordered stages; empty on rows written before the staged workflow. */
+  acceptance: string[]
   stages: TaskStage[]
   /** 0-based index of the current stage; equals `stages.length` once all are done. */
   stageIndex: number
@@ -113,6 +114,7 @@ interface TaskRecord {
 interface TaskCreateInput {
   title: string
   notes?: string
+  acceptance?: string[]
   status?: TaskStatus
   priority?: TaskPriority
   due?: string | null
@@ -132,6 +134,7 @@ interface TaskUpdateInput {
   id: string
   title?: string
   notes?: string
+  acceptance?: string[]
   status?: TaskStatus
   priority?: TaskPriority
   due?: string | null

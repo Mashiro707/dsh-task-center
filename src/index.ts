@@ -457,6 +457,7 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     stages = [draftStage(id, title, notes.trim() === '' ? title : notes.trim())]
   }
   const rawIndex = Number.isFinite(raw.stageIndex) ? Math.trunc(raw.stageIndex as number) : 0
+  const acceptance = cleanStringList(raw.acceptance)
   const stageIndex = Math.max(0, Math.min(rawIndex, stages.length))
   return {
     id,
@@ -474,6 +475,7 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
     autoApprove: raw.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : raw.autoApprove === true,
     run: normalizeRun(raw.run),
+    acceptance,
     stages,
     stageIndex,
     parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
@@ -760,6 +762,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           title,
           notes,
           status,
+          acceptance: cleanStringList(input.acceptance),
           priority: input.priority === undefined ? 'normal' : cleanPriority(input.priority),
           due: cleanDue(input.due),
           tags: cleanTags(input.tags),
@@ -807,6 +810,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           record.blockedBy = cleanIdList(input.blockedBy).filter(entry => entry !== record.id)
         }
         if (input.autoApprove !== undefined) record.autoApprove = input.autoApprove === true
+        if (input.acceptance !== undefined) record.acceptance = cleanStringList(input.acceptance)
         if (input.run !== undefined) record.run = normalizeRun(input.run)
         if (input.stages !== undefined) {
           record.stages = normalizeStages(input.stages, record.id)
@@ -1177,6 +1181,12 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
       type: 'object',
       properties: {
         task_id: { type: 'string', description: 'Task id being planned.' },
+        acceptance: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Commands that decide the whole task is done, run after the last stage: unit tests, a smoke run, an integration check. Every entry is one shell command naming its directory.',
+        },
         stages: {
           type: 'array',
           description: 'Ordered stages; each becomes one document the user approves before it runs.',
@@ -1207,7 +1217,7 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
           },
         },
       },
-      required: ['task_id', 'stages'],
+      required: ['task_id', 'acceptance', 'stages'],
       additionalProperties: false,
     },
     output: JSON_OUTPUT,
@@ -1222,6 +1232,13 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
       }
       const root = (task.workspacePath ?? task.cwd ?? '').trim()
       if (root === '') throw storeError('workspace-missing', '这个任务还没有工作区。')
+      const acceptance = cleanStringList(args?.acceptance)
+      if (acceptance.length === 0) {
+        throw storeError(
+          'bad-request',
+          '没有给出任务级验收命令：整个任务跑完之后，用哪些命令确认它真的能工作（单元测试 / 冒烟测试 / 集成测试）。',
+        )
+      }
       const raw = Array.isArray(args?.stages) ? args.stages : []
       if (raw.length === 0) throw storeError('bad-request', '至少要给一个阶段。')
       if (raw.length > MAX_STAGES) throw storeError('bad-request', `最多 ${MAX_STAGES} 个阶段。`)
@@ -1261,7 +1278,7 @@ function publishTools(ctx: HostContext, store: TaskStore): () => void {
         startedAt: null,
         endedAt: null,
       }))
-      await store.update({ id: taskId, stages, stageIndex: 0 })
+      await store.update({ id: taskId, stages, stageIndex: 0, acceptance })
       return { task_id: taskId, stages: stages.length, doc_dir: `${DOC_ROOT}/${taskId}` }
     },
   })
