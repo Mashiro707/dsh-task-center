@@ -1845,3 +1845,25 @@ test('a transient agent error is retried once', async () => {
     await dispose()
   }
 })
+
+test('a rewritten stage keeps the previous document', async () => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join: joinPath } = await import('node:path')
+  const { writeStageDocs } = await import('../stages.js')
+
+  const root = await mkdtemp(joinPath(tmpdir(), 'tc-docs-'))
+  try {
+    const first = [{ title: '一', goal: '第一次', contract: '4.2.30', scope: [], steps: ['a'], verify: ['go build ./...'] }]
+    await writeStageDocs(root, 't_x', first, '任务')
+    const second = [{ title: '一', goal: '第二次改过', contract: '4.2.30', scope: [], steps: ['a'], verify: ['go build ./...'] }]
+    await writeStageDocs(root, 't_x', second, '任务')
+
+    const kept = await readFile(joinPath(root, 'docs/task-center/t_x/stage-1.v1.md'), 'utf8')
+    assert.match(kept, /第一次/, 'the first version survives the rewrite')
+    const current = await readFile(joinPath(root, 'docs/task-center/t_x/stage-1.md'), 'utf8')
+    assert.match(current, /第二次改过/, 'the current document is the new one')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -107,6 +107,15 @@ export async function writeStageDocs(root, taskId, stages, taskTitle) {
         const absPath = stageAbsPath(root, relPath);
         const text = renderStageDoc(stages[position], ordinal, taskTitle);
         await mkdir(dirname(absPath), { recursive: true });
+        // A rewritten stage must not destroy what was there before: keep the old
+        // text beside it as `stage-N.v1.md`, `stage-N.v2.md`, …
+        const previous = await existingDoc(root, relPath);
+        if (previous !== null && previous.trim() !== '' && previous !== text) {
+            const versionRel = await nextVersion(root, relPath);
+            await writeFile(stageAbsPath(root, versionRel), previous, 'utf8');
+            if (remote !== null)
+                await writeRemoteFile(remote, versionRel, previous);
+        }
         await writeFile(absPath, text, 'utf8');
         if (remote !== null) {
             await writeRemoteFile(remote, relPath, text);
@@ -114,6 +123,35 @@ export async function writeStageDocs(root, taskId, stages, taskTitle) {
         written.push(relPath);
     }
     return written;
+}
+/**
+ * Read a document, treating a missing file as "nothing there".
+ * @param {string} root - absolute workspace directory.
+ * @param {string} relPath - workspace-relative document path.
+ * @returns {Promise<string | null>} the text, or null.
+ */
+async function existingDoc(root, relPath) {
+    try {
+        const text = await readStageDoc(root, relPath);
+        return text === '' ? null : text;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Pick the first free `stage-N.vK.md` beside a document.
+ * @param {string} root - absolute workspace directory.
+ * @param {string} relPath - workspace-relative document path.
+ * @returns {Promise<string>} the versioned path.
+ */
+async function nextVersion(root, relPath) {
+    for (let index = 1; index <= 50; index += 1) {
+        const candidate = relPath.replace(/\.md$/, `.v${index}.md`);
+        if ((await existingDoc(root, candidate)) === null)
+            return candidate;
+    }
+    return relPath.replace(/\.md$/, `.v${Date.now()}.md`);
 }
 /**
  * @param {string} root - absolute workspace directory.
