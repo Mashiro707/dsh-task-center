@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] - 2026-11-11
+
+### Added
+
+- Rewriting a stage document keeps the old text beside it (`stage-N.v1.md`, `stage-N.v2.md`, ...), locally and on a remote workspace. Two stages of the coupon run said the original document had been overwritten, and nothing was left to compare against.
+
 ## [1.29.0] - 2026-11-11
 
 ### Fixed
