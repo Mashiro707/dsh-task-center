@@ -107,3 +107,11 @@ test('a go test -run that matches nothing cannot pass for a green stage', () => 
   )
   assert.deepEqual(strict.errors, [])
 })
+
+test('a thin stage is warned about, not blocked', () => {
+  const thin = checkVerifyCommands(['grep -q TODO main.go'], '/tmp', true)
+  assert.match(thin.warnings.join(' '), /编译\/构建命令/)
+  assert.match(thin.warnings.join(' '), /跑测试的命令/)
+  const full = checkVerifyCommands(['go build ./...', 'go test ./...'], '/tmp', true)
+  assert.deepEqual(full.warnings, [])
+})

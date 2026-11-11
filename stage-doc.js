@@ -42,6 +42,8 @@ function pathWords(command) {
     const words = command.split(/[\s;&|()[\]{}'"`,]+/).filter(Boolean);
     return words.filter(word => !word.startsWith('-') && (/[/\\]/.test(word) || /\.[a-z0-9]{1,5}$/i.test(word)));
 }
+const VERIFY_BUILD = /(^|[;&|]\s*)(go\s+build|go\s+vet|npm\s+run\s+build|npm\s+build|pnpm\s+(run\s+)?build|cargo\s+build|mvn\s+(-\S+\s+)*compile|gradle\s+(build|compile\w*)|make|tsc)\b/;
+const VERIFY_TEST = /(^|[;&|]\s*)(go\s+test|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|cargo\s+test|pytest|node\s+--test|mvn\s+(-\S+\s+)*test|gradle\s+test|jest|vitest)\b/;
 const DANGEROUS = [
     { pattern: /\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+[~/]/, why: '递归删除根目录或家目录' },
     { pattern: /\bsudo\b/, why: '需要 sudo' },
@@ -104,6 +106,15 @@ export function checkVerifyCommands(commands, root, remote = false) {
             continue;
         errors.push(`go test -run 在没有匹配用例时也返回 0，必须断言通过，例如 -v … | grep -q -- '--- PASS:': ${command}`);
     }
+    // Strength: a stage that only greps a file never proved it compiles or that
+    // anything was tested. This warns instead of blocking, because doc-only stages
+    // legitimately have nothing to build.
+    const hasBuild = commands.some((entry) => VERIFY_BUILD.test(entry));
+    const hasTest = commands.some((entry) => VERIFY_TEST.test(entry));
+    if (!hasBuild)
+        warnings.push('验收里没有编译/构建命令：改坏了能不能编译，建议先证明。');
+    if (!hasTest)
+        warnings.push('验收里没有跑测试的命令：建议至少跑一条单元测试或集成测试。');
     return { errors, warnings };
 }
 /**
