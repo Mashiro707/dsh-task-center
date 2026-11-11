@@ -96,3 +96,14 @@ test('a stage without steps is refused, one step only warns', () => {
   assert.deepEqual(single.errors, [])
   assert.equal(single.warnings.length, 1)
 })
+
+test('a go test -run that matches nothing cannot pass for a green stage', () => {
+  const loose = checkVerifyCommands(['go test -run TestX ./svc'], '/tmp', true)
+  assert.match(loose.errors.join(' '), /--- PASS/)
+  const strict = checkVerifyCommands(
+    ["go test -v -run TestX ./svc 2>&1 | grep -q -- '--- PASS: TestX'"],
+    '/tmp',
+    true,
+  )
+  assert.deepEqual(strict.errors, [])
+})

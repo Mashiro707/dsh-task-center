@@ -94,6 +94,16 @@ export function checkVerifyCommands(commands, root, remote = false) {
             warnings.push(`命令以 ! 取反，一旦路径写错会被当成「通过」：${command}`);
         }
     }
+    // `go test -run X` exits 0 when nothing matches, so a typo in the test name
+    // would look exactly like a passing suite.
+    for (const raw of commands) {
+        const command = String(raw ?? '');
+        if (!/\bgo\s+test\b/.test(command) || !/-run\b/.test(command))
+            continue;
+        if (/(\||&&|;)\s*grep\s+(-\w+\s+)*(--)?\s*'?"?---\s*PASS/.test(command))
+            continue;
+        errors.push(`go test -run 在没有匹配用例时也返回 0，必须断言通过，例如 -v … | grep -q -- '--- PASS:': ${command}`);
+    }
     return { errors, warnings };
 }
 /**
