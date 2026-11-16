@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] - 2026-11-16
+
+### Added
+
+- A task now keeps a lifetime token total (`spentTokens`) beside the per-run figure. The drawer shows `累计 …` once more than one run has contributed, and `本轮 …` while only one has.
+
+### Fixed
+
+- The counter could not have worked before: the field existed only on the update payload, so `update()` never assigned it and `normalizeRecord()` never read it back.
+
 ## [1.35.0] - 2026-11-16
 
 ### Added
