@@ -1202,7 +1202,7 @@ async function planOneStage(store, task, workspace, overrides = {}) {
     ...task.stages[0],
     title: overrides.title ?? '改接口',
     scope: overrides.scope ?? ['src'],
-    kind: overrides.kind ?? 'requirements',
+    kind: overrides.kind ?? 'develop',
     contract: overrides.contract ?? '4.2.30',
     steps: overrides.steps ?? ['改代码'],
     verify: overrides.verify ?? ['node --version'],
@@ -1615,6 +1615,33 @@ test('the task is not done until its acceptance commands pass', async () => {
     })
     assert.equal(row.status, 'blocked', 'a failing final check keeps the task open')
     assert.match(row.notes, /\[终验\] 没通过/, 'the row says the final check failed')
+  } finally {
+    await dispose()
+  }
+})
+
+test('a requirements document without test cases is not approved', async () => {
+  const { dir, store, dispose } = await makeStore()
+  try {
+    const workspace = join(dir, 'ws')
+    await mkdir(workspace, { recursive: true })
+    const host = makeHost()
+    const runner = createRunner(host.ctx, store)
+    const task = await store.create({ title: '缺用例', workspacePath: workspace })
+    await planOneStage(store, task, workspace, { status: 'awaiting-approval', kind: 'requirements' })
+
+    await assert.rejects(() => runner.approveStage(task.id), /测试用例/)
+    const row = (await store.list()).tasks.find(entry => entry.id === task.id)
+    assert.equal(row.stages[0].status, 'awaiting-approval', 'it stays reviewable')
+
+    const casesDir = join(workspace, 'docs', 'task-center', task.id)
+    await mkdir(casesDir, { recursive: true })
+    await writeFile(join(casesDir, 'test-cases.md'), '# 测试用例\n\n1. 登录成功后返回 token\n', 'utf8')
+    const approved = await runner.approveStage(task.id)
+    assert.ok(
+      approved.stages[0].status === 'approved' || approved.stages[0].status === 'running',
+      'with the file in place it approves and starts running',
+    )
   } finally {
     await dispose()
   }

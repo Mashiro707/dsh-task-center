@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js'
 import type { RemoteTarget } from './remote.js'
 import { checkStageContract, checkVerifyCommands } from './stage-doc.js'
-import { currentStage, readStageDoc, stageAbsPath } from './stages.js'
+import { currentStage, DOC_ROOT, readStageDoc, stageAbsPath } from './stages.js'
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js'
 import { pickRepo, removeWorktreeCommands, worktreeBranch, worktreeIsDirty, worktreePath } from './worktree.js'
 import type { VerifyOutcome } from './verify.js'
@@ -1932,6 +1932,20 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       const check = checkVerifyCommands(stage.verify, workspaceRoot(task), verifyTarget(task) !== undefined)
       const contract = checkStageContract(stage)
       const problems = [...contract.errors, ...check.errors]
+    // The test phase runs the cases this document promises; without the file it
+    // would have nothing to execute.
+    if (stage.kind === 'requirements') {
+      const casesPath = `${DOC_ROOT}/${task.id}/test-cases.md`
+      let cases = ''
+      try {
+        cases = await readStageDoc(workspaceRoot(task), casesPath)
+      } catch {
+        cases = ''
+      }
+      if (cases.trim() === '') {
+        problems.push(`需求确认阶段没有写测试用例：${casesPath} 不存在或为空。`)
+      }
+    }
       if (problems.length > 0) {
         const message = `文档还不完整：${problems.join('；')}`
         await patchStage(taskId, stage.index, { message })
