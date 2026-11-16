@@ -439,8 +439,9 @@ test('a cancel that lands mid-launch still stops the session', async () => {
     const task = await store.create({ title: '抢跑', cwd: 'C:/work/app' })
 
     const started = runner.start(task.id)
-    // Give `start` a tick to reach `create`, then cancel before it resolves.
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    // `create` records the request before it parks on the gate, so waiting for it
+    // to appear is exact — a fixed tick raced on a slow machine.
+    await waitFor(() => (host.created.length === 1 ? true : null))
     assert.deepEqual(await runner.cancel(task.id), { canceled: true })
     release()
     await started
@@ -649,7 +650,9 @@ test('a session reused by a later stage can still settle', async () => {
     host.emit('agent/status', { agent: host.agents.get(sessionId), status: 'idle' })
     await waitFor(async () => {
       const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
-      return row.run !== null && row.run.status !== 'running' ? row : null
+      if (row.run === null || row.run.status === 'running') return null
+      const stage = row.stages[row.stageIndex]
+      return stage !== undefined && stage.status !== 'running' ? row : null
     })
 
     // The stage failed without a document, so running again plans once more in
@@ -661,7 +664,9 @@ test('a session reused by a later stage can still settle', async () => {
 
     const done = await waitFor(async () => {
       const row = (await store.list()).tasks.find((entry) => entry.id === task.id)
-      return row.run !== null && row.run.status !== 'running' && row.run.attempts === 2 ? row : null
+      return row.run !== null && row.run.status !== 'running' && row.run.attempts === 2 && row.run.endedAt !== null
+        ? row
+        : null
     })
     assert.ok(done.run.endedAt !== null, 'the second attempt was settled, not swallowed')
   } finally {
@@ -1608,10 +1613,15 @@ test('the task is not done until its acceptance commands pass', async () => {
     agent.status = 'idle'
     host.emit('agent/status', { agent, status: 'idle' })
 
+    // Wait for a real outcome: the row is "todo" before the run starts, so a
+    // "not doing" test could match the row before anything happened.
+    // The status and the note are written in sequence, so wait for the note: it is
+    // the last thing the gate produces.
     const row = await waitFor(async () => {
       const board = await store.list()
       const found = board.tasks.find(entry => entry.id === task.id)
-      return found !== undefined && found.status !== 'doing' ? found : null
+      if (found === undefined) return null
+      return String(found.notes ?? '').includes('[终验]') ? found : null
     })
     assert.equal(row.status, 'blocked', 'a failing final check keeps the task open')
     assert.match(row.notes, /\[终验\] 没通过/, 'the row says the final check failed')
