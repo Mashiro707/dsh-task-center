@@ -298,6 +298,8 @@ test('the stage group shows what the task has cost so far', () => {
   assert.match(text, /\.tc-group-note\{/, 'the summary line has its own style')
   assert.match(text, /usageLabel\(task, t\)/, 'the stage group renders it')
   assert.match(text, /usageRun/, 'it says the token figure is this run, not a lifetime total')
+  assert.match(text, /const approveChain = async/, 'one click can walk the remaining stages')
+  assert.match(text, /data-action': 'approve-chain'/, 'and it is its own button')
 })
 
 test('the editor opens as a sized dialog, not a cramped drawer', () => {

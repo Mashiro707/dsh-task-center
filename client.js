@@ -63,6 +63,7 @@ window.__ModuleLoader__.load({
                 groupDeps: '依赖',
                 groupStages: '阶段',
                 stageHint: '每个阶段先写文档，你批准之后才会执行。',
+                approveChain: '批准并自动推进',
                 usageRun: '本轮',
                 usageStages: '阶段',
                 usageMinutes: '分钟',
@@ -216,6 +217,7 @@ window.__ModuleLoader__.load({
                 groupDeps: 'Dependencies',
                 groupStages: 'Stages',
                 stageHint: 'Each stage writes a document first; it runs only after you approve it.',
+                approveChain: 'Approve and continue',
                 usageRun: 'this run',
                 usageStages: 'stages',
                 usageMinutes: 'min',
@@ -1421,6 +1423,15 @@ window.__ModuleLoader__.load({
                         ? h('button', {
                             type: 'button',
                             className: 'tc-btn tc-btn-quiet',
+                            'data-action': 'approve-chain',
+                            onClick: () => {
+                                void props.onApproveChain(task.id);
+                            },
+                        }, t('approveChain'))
+                        : null, awaiting
+                        ? h('button', {
+                            type: 'button',
+                            className: 'tc-btn tc-btn-quiet',
                             onClick: () => {
                                 void props.onStageCheck(task.id, index + 1);
                             },
@@ -1918,6 +1929,30 @@ window.__ModuleLoader__.load({
                     setNotice({ kind: 'error', text: error && error.message ? error.message : String(error) });
                 }
             };
+            /** Approve this stage, wait for the next plan, approve it too, and so on. */
+            const approveChain = async (id) => {
+                for (let step = 0; step < 20; step += 1) {
+                    const board = await call('list', {});
+                    const found = (board.tasks || []).find((entry) => entry.id === id);
+                    if (found === undefined)
+                        return;
+                    const stages = Array.isArray(found.stages) ? found.stages : [];
+                    const stage = stages[found.stageIndex === undefined ? 0 : found.stageIndex];
+                    if (stage === undefined)
+                        return;
+                    if (stage.status === 'awaiting-approval') {
+                        await call('approveStage', { id, ordinal: stage.index });
+                        continue;
+                    }
+                    if (stage.status === 'running' || stage.status === 'approved') {
+                        await new Promise((resolve) => setTimeout(resolve, 2000));
+                        continue;
+                    }
+                    break;
+                }
+                await refresh();
+                setNotice({ kind: 'ok', text: t('approveChain') });
+            };
             const stageAction = async (id, ordinal, action, feedback) => {
                 try {
                     const payload = { id, ordinal };
@@ -2008,6 +2043,7 @@ window.__ModuleLoader__.load({
                         onOpen: setOpenId,
                         onToggle: toggleTask,
                         onRun: startRun,
+                        onApproveChain: approveChain,
                         onCancelRun: stopRun,
                         onOpenSession: openTaskSession,
                         onDragStart: setDragId,
