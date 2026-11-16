@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.0] - 2026-11-16
+
+### Added
+
+- Every task now walks four fixed phases - requirements, build, test, repair - instead of an arbitrary list of stages. Only the requirements document waits for you; the rest start on their own once it is approved.
+- A failing test hands over to the repair phase and the test runs again afterwards, at most three rounds.
+- Each stage row carries a colour-coded phase chip (requirements / build / test / repair).
+
+### Fixed
+
+- The repair round counter is stored on the task, so a Host restart no longer resets it.
+
 ## [1.30.0] - 2026-11-11
 
 ### Added
