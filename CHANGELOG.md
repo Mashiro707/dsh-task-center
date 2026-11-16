@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] - 2026-11-16
+
+### Added
+
+- A waiting stage offers **Approve and continue**: one click approves it, waits for the next plan, approves that too, and repeats until the task finishes, fails, or a stage needs a fresh plan. Twenty steps at most, two seconds between polls.
+- It sits beside the normal approve button and does not replace it: approving one document at a time stays the default, because this one stops asking for review for the rest of the task.
+
 ## [1.34.0] - 2026-11-16
 
 ### Added
