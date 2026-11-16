@@ -605,6 +605,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   /** Task ids waiting for a slot, in start order. */
   const queue: string[] = []
   /** Task ids whose session is being created right now. */
+  const repairRounds = new Map<string, number>()
   const starting = new Set<string>()
   /** Task ids cancelled while `starting`, to be stopped once a session exists. */
   const stopping = new Set<string>()
@@ -971,6 +972,30 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     }
     if (stage.status !== 'running' && stage.status !== 'approved') return
     if (!passed) {
+      // A failed test does not end the task: it hands over to the repair phase,
+      // and the loop is capped so a repair that cannot fix it does not spin.
+      const fixPosition = task.stages.findIndex(entry => entry.kind === 'fix')
+      const rounds = repairRounds.get(task.id) ?? 0
+      if (stage.kind === 'test' && fixPosition >= 0 && rounds < 3) {
+        const fixStage = task.stages[fixPosition]
+        await patchStage(task.id, stage.index, {
+          status: 'failed',
+          message: message ?? '测试没通过。',
+          endedAt: Date.now(),
+        })
+        await patchStage(task.id, fixStage.index, {
+          status: 'approved',
+          message: `第 ${rounds + 1} 轮修复：按上面的失败原因改`,
+          endedAt: null,
+          startedAt: null,
+        })
+        repairRounds.set(task.id, rounds + 1)
+        await store.update({ id: task.id, stageIndex: fixPosition })
+        setTimeout(() => {
+          void start(task.id).catch(error => note(`repair round did not start: ${describe(error)}`))
+        }, 0)
+        return
+      }
       await patchStage(task.id, stage.index, { status: 'failed', message: message ?? '执行失败。', endedAt: Date.now() })
       return
     }
@@ -1081,6 +1106,20 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       }
       return entry
     })
+    if (stage.kind === 'fix') {
+      // Repair is a detour: once it lands, the test phase runs again.
+      const testPosition = current.stages.findIndex(entry => entry.kind === 'test')
+      if (testPosition >= 0) {
+        const reopened = stages.map((entry, position) =>
+          position === testPosition ? { ...entry, status: 'approved' as TaskStageStatus, message: null } : entry,
+        )
+        await store.update({ id: current.id, stages: reopened, stageIndex: testPosition })
+        setTimeout(() => {
+          void start(current.id).catch(error => note(`re-test did not start: ${describe(error)}`))
+        }, 0)
+        return
+      }
+    }
     const finished = nextIndex >= stages.length
     if (finished && (current.acceptance ?? []).length > 0) {
       // The stages are done; the task is not, until the commands the user asked
