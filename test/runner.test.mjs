@@ -1202,6 +1202,7 @@ async function planOneStage(store, task, workspace, overrides = {}) {
     ...task.stages[0],
     title: overrides.title ?? '改接口',
     scope: overrides.scope ?? ['src'],
+    kind: overrides.kind ?? 'requirements',
     contract: overrides.contract ?? '4.2.30',
     steps: overrides.steps ?? ['改代码'],
     verify: overrides.verify ?? ['node --version'],

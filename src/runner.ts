@@ -950,6 +950,16 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
         })
         return
       }
+      // Only the requirements phase waits for the user. The later ones run on
+      // their own as soon as their document lands, otherwise every task would
+      // cost four clicks.
+      if (stage.status === 'awaiting-approval' && stage.kind !== 'requirements') {
+        await patchStage(task.id, stage.index, { status: 'approved' })
+        setTimeout(() => {
+          void start(task.id).catch(error => note(`auto phase did not start: ${describe(error)}`))
+        }, 0)
+        return
+      }
       // The user can approve while the planning run is still closing. Once its
       // row is written as finished, start the execute run for them.
       if (stage.status === 'approved') {

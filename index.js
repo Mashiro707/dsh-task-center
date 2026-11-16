@@ -312,8 +312,24 @@ function cleanStringList(value) {
  * @param {string} goal - what the stage has to achieve.
  * @returns {TaskStage} a fresh draft stage.
  */
-function draftStage(taskId, title, goal) {
+/**
+ * The four phases every task walks through. Only the first one waits for the
+ * user; the rest run on their own once the requirements document is accepted.
+ * @param {string} taskId - the task these stages belong to.
+ * @param {string} title - the task title, used in the goals.
+ * @returns {TaskStage[]} the stages, in order.
+ */
+function draftStages(taskId, title) {
+    return [
+        draftStage(taskId, '需求确认', `拆解「${title}」的需求：开发计划、可行性评估、测试用例`, 'requirements'),
+        draftStage(taskId, '开发', '严格按需求确认阶段的计划实现', 'develop'),
+        draftStage(taskId, '测试', '按 test-cases.md 跑单元测试、冒烟测试、集成测试', 'test'),
+        draftStage(taskId, '修复', '根据测试结果修复问题，修完回到测试', 'fix'),
+    ];
+}
+function draftStage(taskId, title, goal, kind = 'develop') {
     return {
+        kind,
         index: 1,
         title,
         goal,
@@ -337,6 +353,16 @@ function draftStage(taskId, title, goal) {
  * @param {number} position - 0-based position in the list.
  * @returns {TaskStage | null} the normalized stage.
  */
+/**
+ * @param {unknown} value - the stored kind.
+ * @returns {TaskStageKind} a known kind; records made before kinds existed were
+ * implementation stages, so they read as `develop`.
+ */
+function normalizeKind(value) {
+    return value === 'requirements' || value === 'develop' || value === 'test' || value === 'fix'
+        ? value
+        : 'develop';
+}
 function normalizeStage(raw, taskId, position) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
         return null;
@@ -354,6 +380,7 @@ function normalizeStage(raw, taskId, position) {
         : 'draft';
     return {
         index: position + 1,
+        kind: normalizeKind(source.kind),
         title,
         goal: typeof source.goal === 'string' ? source.goal : '',
         contract: typeof source.contract === 'string' ? source.contract : '',
@@ -731,7 +758,7 @@ export function createTaskStore(options = {}) {
                     blockedBy: cleanIdList(input.blockedBy),
                     autoApprove: input.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : input.autoApprove === true,
                     run: null,
-                    stages: [draftStage(id, title, notes.trim() === '' ? title : notes.trim())],
+                    stages: draftStages(id, title),
                     stageIndex: 0,
                     parentId,
                     createdAt: now,
@@ -1229,6 +1256,7 @@ function publishTools(ctx, store) {
             }
             await writeStageDocs(root, taskId, parsed, task.title);
             const stages = parsed.map((entry, position) => ({
+                kind: 'develop',
                 index: position + 1,
                 title: entry.title,
                 goal: entry.goal,

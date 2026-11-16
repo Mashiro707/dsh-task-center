@@ -42,11 +42,15 @@ interface TaskRun {
 }
 
 /** Where a stage sits in the document-then-execute flow. */
+/** The four phases a task walks through. */
+type TaskStageKind = 'requirements' | 'develop' | 'test' | 'fix'
+
 type TaskStageStatus = 'draft' | 'awaiting-approval' | 'approved' | 'running' | 'done' | 'failed'
 
 /** One stage of a task: a document to approve, then work to do inside its scope. */
 interface TaskStage {
   /** 1-based ordinal, also the number in the document file name. */
+  kind: TaskStageKind
   index: number
   title: string
   goal: string
