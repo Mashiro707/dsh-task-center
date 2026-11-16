@@ -106,6 +106,8 @@ interface TaskRecord {
   blockedBy: string[]
   /** Answer this task's in-workspace approvals without asking the user. */
   autoApprove: boolean
+  /** Tokens spent across every run, as far as the host could measure. */
+  spentTokens?: number
   /** Parent task id; subtasks are exactly one level deep. */
   parentId: string | null
   createdAt: number
@@ -160,6 +162,7 @@ interface TaskUpdateInput {
   stages?: TaskStage[]
   /** Written by the stage advance logic only. */
   stageIndex?: number
+  spentTokens?: number
 }
 
 /** One trashed tree as reported to the UI. */

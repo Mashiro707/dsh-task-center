@@ -360,6 +360,12 @@ test('the run records the context tokens the host estimates', async () => {
       return row.run.tokens !== null ? row : null
     })
     assert.equal(settled.run.tokens, 1234, 'the estimate is kept on the run')
+
+    assert.equal(
+      (await store.list()).tasks.find((entry) => entry.id === task.id).spentTokens,
+      1234,
+      'the task keeps a lifetime total across runs',
+    )
     assert.deepEqual((await runner.stats()).measureKeys, ['tokens'], 'and the shape is visible for later checks')
   } finally {
     await dispose()

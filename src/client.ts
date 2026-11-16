@@ -89,6 +89,7 @@ window.__ModuleLoader__.load({
         groupStages: '阶段',
         stageHint: '每个阶段先写文档，你批准之后才会执行。',
         approveChain: '批准并自动推进',
+        usageTotal: '累计',
         usageRun: '本轮',
         usageStages: '阶段',
         usageMinutes: '分钟',
@@ -243,6 +244,7 @@ window.__ModuleLoader__.load({
         groupStages: 'Stages',
         stageHint: 'Each stage writes a document first; it runs only after you approve it.',
         approveChain: 'Approve and continue',
+        usageTotal: 'total',
         usageRun: 'this run',
         usageStages: 'stages',
         usageMinutes: 'min',
@@ -518,8 +520,10 @@ window.__ModuleLoader__.load({
     minutes += Math.max(0, entry.endedAt - entry.startedAt)
   }
   const parts: string[] = []
+  const lifetime = typeof task.spentTokens === 'number' ? task.spentTokens : 0
   const tokens = task.run === null || task.run === undefined ? 0 : task.run.tokens
-  if (typeof tokens === 'number' && tokens > 0) parts.push(t('usageRun') + ' ' + formatTokens(tokens))
+  if (lifetime > 0 && lifetime > tokens) parts.push(t('usageTotal') + ' ' + formatTokens(lifetime))
+  else if (typeof tokens === 'number' && tokens > 0) parts.push(t('usageRun') + ' ' + formatTokens(tokens))
   parts.push(done + '/' + stages.length + ' ' + t('usageStages'))
   if (minutes > 60000) parts.push(Math.round(minutes / 60000) + ' ' + t('usageMinutes'))
   return parts.join(' · ')

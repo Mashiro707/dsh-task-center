@@ -513,6 +513,7 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     stageIndex,
     parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
     createdAt,
+    spentTokens: Number.isFinite(raw.spentTokens) ? Math.max(0, Math.trunc(raw.spentTokens as number)) : 0,
     updatedAt: Number.isFinite(raw.updatedAt) ? (raw.updatedAt as number) : createdAt,
     completedAt: Number.isFinite(raw.completedAt) ? (raw.completedAt as number) : null,
     deletedAt,
@@ -832,6 +833,9 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
         const record = requireLive(records, input.id)
         if (input.title !== undefined) record.title = cleanTitle(input.title)
         if (input.notes !== undefined) record.notes = cleanNotes(input.notes)
+        if (input.spentTokens !== undefined && Number.isFinite(input.spentTokens)) {
+          record.spentTokens = Math.max(0, Math.trunc(input.spentTokens as number))
+        }
         if (input.priority !== undefined) record.priority = cleanPriority(input.priority)
         if (input.due !== undefined) record.due = cleanDue(input.due)
         if (input.tags !== undefined) record.tags = cleanTags(input.tags)

@@ -466,6 +466,7 @@ function normalizeRecord(raw) {
         stageIndex,
         parentId: typeof raw.parentId === 'string' && raw.parentId !== '' ? raw.parentId : null,
         createdAt,
+        spentTokens: Number.isFinite(raw.spentTokens) ? Math.max(0, Math.trunc(raw.spentTokens)) : 0,
         updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : createdAt,
         completedAt: Number.isFinite(raw.completedAt) ? raw.completedAt : null,
         deletedAt,
@@ -786,6 +787,9 @@ export function createTaskStore(options = {}) {
                     record.title = cleanTitle(input.title);
                 if (input.notes !== undefined)
                     record.notes = cleanNotes(input.notes);
+                if (input.spentTokens !== undefined && Number.isFinite(input.spentTokens)) {
+                    record.spentTokens = Math.max(0, Math.trunc(input.spentTokens));
+                }
                 if (input.priority !== undefined)
                     record.priority = cleanPriority(input.priority);
                 if (input.due !== undefined)

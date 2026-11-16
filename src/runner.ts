@@ -1287,6 +1287,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       await store.update({
         id: taskId,
         run: { ...run, status, endedAt: Date.now(), message, tokens: measured === null ? (run.tokens ?? null) : measured },
+        spentTokens: (task.spentTokens ?? 0) + (measured === null ? 0 : measured),
       })
       // The stage decides what happens next: verify it, advance, or record the
       // failure. Only after that row is on disk, so a crash cannot skip it.
