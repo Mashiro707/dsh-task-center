@@ -88,6 +88,10 @@ window.__ModuleLoader__.load({
         groupDeps: '依赖',
         groupStages: '阶段',
         stageHint: '每个阶段先写文档，你批准之后才会执行。',
+        phaseRequirements: '需求确认',
+        phaseDevelop: '开发',
+        phaseTest: '测试',
+        phaseFix: '修复',
         stageDraft: '待规划',
         stageAwait: '待批准',
         stageApproved: '已批准',
@@ -234,6 +238,10 @@ window.__ModuleLoader__.load({
         groupDeps: 'Dependencies',
         groupStages: 'Stages',
         stageHint: 'Each stage writes a document first; it runs only after you approve it.',
+        phaseRequirements: 'Requirements',
+        phaseDevelop: 'Build',
+        phaseTest: 'Test',
+        phaseFix: 'Repair',
         stageDraft: 'To plan',
         stageAwait: 'Awaiting approval',
         stageApproved: 'Approved',
@@ -1771,6 +1779,17 @@ function TaskCard(props) {
                         className: 'tc-stage' + (current ? ' tc-stage-current' : ''),
                       },
                       h('span', { className: 'tc-stage-no' }, String(index + 1)),
+                      h(
+                        'span',
+                        { className: 'tc-stage-kind tc-kind-' + String(entry.kind ?? 'develop') },
+                        entry.kind === 'requirements'
+                          ? t('phaseRequirements')
+                          : entry.kind === 'test'
+                            ? t('phaseTest')
+                            : entry.kind === 'fix'
+                              ? t('phaseFix')
+                              : t('phaseDevelop'),
+                      ),
                       h('span', { className: 'tc-stage-title' }, entry.title),
                       h(
                         'span',
@@ -3033,6 +3052,11 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-pill.tc-stage-failed{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
 .tc-stage-pill.tc-stage-done{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 38%,transparent)}
 .tc-stage-acts{flex:0 0 auto;display:inline-flex;gap:4px}
+.tc-stage-kind{flex:0 0 auto;display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;font-size:12px;font-weight:600;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
+.tc-kind-requirements{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,transparent);color:var(--dsw-alias-brand-primary)}
+.tc-kind-develop{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 14%,transparent);color:var(--dsw-alias-state-success-primary)}
+.tc-kind-test{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 16%,transparent);color:var(--dsw-alias-state-warn-primary)}
+.tc-kind-fix{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent);color:var(--dsw-alias-state-error-primary)}
 .tc-stage-steps{flex:1 0 100%;margin:2px 0 0;padding:0 0 0 20px;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary)}
 .tc-stage-steps li{margin-top:2px}
 .tc-reject{flex:1 0 100%;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:6px}

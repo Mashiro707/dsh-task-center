@@ -99,6 +99,8 @@ interface TaskRecord {
   acceptance: string[]
   stages: TaskStage[]
   /** 0-based index of the current stage; equals `stages.length` once all are done. */
+  /** Repair rounds the test -> fix loop already used. */
+  rounds?: number
   stageIndex: number
   /** Ids of tasks that must reach `done` before this one may run. */
   blockedBy: string[]
@@ -135,6 +137,7 @@ interface TaskCreateInput {
 
 /** Fields accepted when updating a task; only what is present is applied. */
 interface TaskUpdateInput {
+  rounds?: number
   id: string
   title?: string
   notes?: string

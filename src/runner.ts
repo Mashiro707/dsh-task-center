@@ -605,7 +605,6 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
   /** Task ids waiting for a slot, in start order. */
   const queue: string[] = []
   /** Task ids whose session is being created right now. */
-  const repairRounds = new Map<string, number>()
   const starting = new Set<string>()
   /** Task ids cancelled while `starting`, to be stopped once a session exists. */
   const stopping = new Set<string>()
@@ -975,7 +974,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
       // A failed test does not end the task: it hands over to the repair phase,
       // and the loop is capped so a repair that cannot fix it does not spin.
       const fixPosition = task.stages.findIndex(entry => entry.kind === 'fix')
-      const rounds = repairRounds.get(task.id) ?? 0
+      const rounds = task.rounds ?? 0
       if (stage.kind === 'test' && fixPosition >= 0 && rounds < 3) {
         const fixStage = task.stages[fixPosition]
         await patchStage(task.id, stage.index, {
@@ -989,8 +988,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
           endedAt: null,
           startedAt: null,
         })
-        repairRounds.set(task.id, rounds + 1)
-        await store.update({ id: task.id, stageIndex: fixPosition })
+        await store.update({ id: task.id, stageIndex: fixPosition, rounds: rounds + 1 })
         setTimeout(() => {
           void start(task.id).catch(error => note(`repair round did not start: ${describe(error)}`))
         }, 0)

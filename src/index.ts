@@ -503,6 +503,7 @@ function normalizeRecord(raw: Record<string, unknown> | null): TaskRecord | null
     workdir,
     permission: cleanText(raw.permission),
     cwd: cleanCwd(raw.cwd),
+    rounds: typeof raw.rounds === 'number' && raw.rounds > 0 ? Math.trunc(raw.rounds) : 0,
     blockedBy: cleanIdList(raw.blockedBy).filter(entry => entry !== id),
     autoApprove: raw.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : raw.autoApprove === true,
     run: normalizeRun(raw.run),
@@ -806,6 +807,7 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
           autoApprove: input.autoApprove === undefined ? workspaceId !== null || workspacePath !== null : input.autoApprove === true,
           run: null,
           stages: draftStages(id, title),
+          rounds: 0,
           stageIndex: 0,
           parentId,
           createdAt: now,
@@ -842,6 +844,9 @@ export function createTaskStore(options: { dataFile?: string } = {}): TaskStore 
         }
         if (input.autoApprove !== undefined) record.autoApprove = input.autoApprove === true
         if (input.acceptance !== undefined) record.acceptance = cleanStringList(input.acceptance)
+        if (input.rounds !== undefined && Number.isFinite(input.rounds)) {
+          record.rounds = Math.max(0, Math.trunc(input.rounds as number))
+        }
         if (input.run !== undefined) record.run = normalizeRun(input.run)
         if (input.stages !== undefined) {
           record.stages = normalizeStages(input.stages, record.id)
