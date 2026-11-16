@@ -63,6 +63,9 @@ window.__ModuleLoader__.load({
                 groupDeps: '依赖',
                 groupStages: '阶段',
                 stageHint: '每个阶段先写文档，你批准之后才会执行。',
+                usageRun: '本轮',
+                usageStages: '阶段',
+                usageMinutes: '分钟',
                 phaseRequirements: '需求确认',
                 phaseDevelop: '开发',
                 phaseTest: '测试',
@@ -213,6 +216,9 @@ window.__ModuleLoader__.load({
                 groupDeps: 'Dependencies',
                 groupStages: 'Stages',
                 stageHint: 'Each stage writes a document first; it runs only after you approve it.',
+                usageRun: 'this run',
+                usageStages: 'stages',
+                usageMinutes: 'min',
                 phaseRequirements: 'Requirements',
                 phaseDevelop: 'Build',
                 phaseTest: 'Test',
@@ -444,6 +450,26 @@ window.__ModuleLoader__.load({
          * @param {number} startedAt - when the run started.
          * @returns {string} compact elapsed time for the running pill.
          */
+        function usageLabel(task, t) {
+            const stages = Array.isArray(task.stages) ? task.stages : [];
+            const done = stages.filter((entry) => entry !== null && entry.status === 'done').length;
+            let minutes = 0;
+            for (const entry of stages) {
+                if (entry === null || typeof entry !== 'object')
+                    continue;
+                if (typeof entry.startedAt !== 'number' || typeof entry.endedAt !== 'number')
+                    continue;
+                minutes += Math.max(0, entry.endedAt - entry.startedAt);
+            }
+            const parts = [];
+            const tokens = task.run === null || task.run === undefined ? 0 : task.run.tokens;
+            if (typeof tokens === 'number' && tokens > 0)
+                parts.push(t('usageRun') + ' ' + formatTokens(tokens));
+            parts.push(done + '/' + stages.length + ' ' + t('usageStages'));
+            if (minutes > 60000)
+                parts.push(Math.round(minutes / 60000) + ' ' + t('usageMinutes'));
+            return parts.join(' · ');
+        }
         function formatTokens(value) {
             if (!(value > 0))
                 return '';
@@ -1364,7 +1390,7 @@ window.__ModuleLoader__.load({
                 onChange: (event) => stage({ notes: event.target.value }),
                 onBlur: flush,
             })))), stages.length > 0
-                ? h('section', { className: 'tc-group tc-group-stages' }, h('span', { className: 'tc-group-title' }, t('groupStages')), h('ol', { className: 'tc-stagelist' }, stages.map((entry, index) => {
+                ? h('section', { className: 'tc-group tc-group-stages' }, h('span', { className: 'tc-group-title' }, t('groupStages')), h('span', { className: 'tc-group-note' }, usageLabel(task, t)), h('ol', { className: 'tc-stagelist' }, stages.map((entry, index) => {
                     const awaiting = entry.status === 'awaiting-approval';
                     const current = index === stageIndex;
                     return h('li', {
@@ -2348,6 +2374,7 @@ body[data-ds-dark-theme] input.tc-input[type=date]{color-scheme:dark}
 .tc-stage-pill.tc-stage-awaitingapproval{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 38%,transparent)}
 .tc-stage-pill.tc-stage-failed{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 38%,transparent)}
 .tc-stage-pill.tc-stage-done{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 38%,transparent)}
+.tc-group-note{font-size:12px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .tc-stage-acts{flex:0 0 auto;display:inline-flex;gap:4px}
 .tc-stage-kind{flex:0 0 auto;display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;font-size:12px;font-weight:600;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}
 .tc-kind-requirements{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 14%,transparent);color:var(--dsw-alias-brand-primary)}

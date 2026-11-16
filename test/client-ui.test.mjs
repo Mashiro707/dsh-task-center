@@ -292,6 +292,14 @@ test('a card shows the estimated context tokens of its run', () => {
   assert.match(text, /formatTokens\(run\.tokens\)/, 'it reads the run, not the task')
 })
 
+test('the stage group shows what the task has cost so far', () => {
+  const text = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(text, /function usageLabel\(/, 'the totals are computed in one place')
+  assert.match(text, /\.tc-group-note\{/, 'the summary line has its own style')
+  assert.match(text, /usageLabel\(task, t\)/, 'the stage group renders it')
+  assert.match(text, /usageRun/, 'it says the token figure is this run, not a lifetime total')
+})
+
 test('the editor opens as a sized dialog, not a cramped drawer', () => {
   const text = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
   assert.match(text, /\.tc-overlay\{position:fixed;inset:0;z-index:80;display:grid;place-items:center/, 'the overlay centres a fixed dialog')
