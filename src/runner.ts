@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js'
 import type { RemoteTarget } from './remote.js'
 import { checkStageContract, checkVerifyCommands } from './stage-doc.js'
-import { currentStage, DOC_ROOT, readStageDoc, stageAbsPath } from './stages.js'
+import { currentStage, DOC_ROOT, mergeNote, readStageDoc, stageAbsPath } from './stages.js'
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js'
 import { pickRepo, removeWorktreeCommands, worktreeBranch, worktreeIsDirty, worktreePath } from './worktree.js'
 import type { VerifyOutcome } from './verify.js'
@@ -1164,7 +1164,7 @@ export function createRunner(ctx: HostContext, store: RunnerStore): TaskRunner {
     const board = await store.list()
     const task = board.tasks.find(entry => entry.id === taskId)
     if (task === undefined) return
-    const notes = task.notes.trim() === '' ? line : `${task.notes.trim()}\n${line}`
+    const notes = mergeNote(task.notes, line)
     await store.update({ id: taskId, notes })
   }
 

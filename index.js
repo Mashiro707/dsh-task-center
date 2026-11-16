@@ -14,6 +14,7 @@ import { copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { mergeNote } from './stages.js';
 import { createRunner, service } from './runner.js';
 import { currentStage, DOC_ROOT, stageRelPath, writeStageDocs } from './stages.js';
 /**
@@ -1304,7 +1305,7 @@ function publishTools(ctx, store) {
                 throw storeError('not-found', `找不到任务 ${taskId}。`);
             const stage = currentStage(task);
             const line = `[阶段 ${stage === null ? '?' : stage.index}] ${summary}`;
-            const notes = task.notes.trim() === '' ? line : `${task.notes.trim()}\n${line}`;
+            const notes = mergeNote(task.notes, line);
             const record = await store.update({ id: taskId, notes });
             return { task_id: taskId, notes: record.notes };
         },

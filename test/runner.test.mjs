@@ -1905,3 +1905,13 @@ test('a rewritten stage keeps the previous document', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a stage note replaces its earlier self', async () => {
+  const { mergeNote } = await import('../stages.js')
+  const once = mergeNote('', '[阶段 1] 开始')
+  const twice = mergeNote(once, '[阶段 1] 完成')
+  assert.equal(twice, '[阶段 1] 完成', 'one line per stage, not a growing log')
+  const mixed = mergeNote('[阶段 1] 完成\n[终验] 通过', '[阶段 2] 开始')
+  assert.equal(mixed, '[阶段 1] 完成\n[终验] 通过\n[阶段 2] 开始', 'other tags stay')
+  assert.equal(mergeNote('纯文本说明', '[阶段 1] x'), '纯文本说明\n[阶段 1] x', 'untagged notes are kept')
+})

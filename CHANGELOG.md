@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] - 2026-11-16
+
+### Changed
+
+- A stage note replaces its earlier self instead of appending: the coupon run ended with five `[阶段 1]` lines that contradicted each other. `[终验]` behaves the same way, and untagged text is left alone.
+
 ## [1.32.0] - 2026-11-16
 
 ### Added

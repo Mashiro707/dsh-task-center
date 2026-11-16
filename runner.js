@@ -13,7 +13,7 @@ import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promis
 import { dirname, isAbsolute, join } from 'node:path';
 import { mapToRemotePath, resolveRemote, runRemoteCommand, shellQuote } from './remote.js';
 import { checkStageContract, checkVerifyCommands } from './stage-doc.js';
-import { currentStage, DOC_ROOT, readStageDoc, stageAbsPath } from './stages.js';
+import { currentStage, DOC_ROOT, mergeNote, readStageDoc, stageAbsPath } from './stages.js';
 import { DEFAULT_VERIFY_TIMEOUT_MS, runCommand, runVerifyCommands } from './verify.js';
 import { pickRepo, removeWorktreeCommands, worktreeBranch, worktreeIsDirty, worktreePath } from './worktree.js';
 /** How many runs may be alive at once when the caller asks for no particular cap. */
@@ -1010,7 +1010,7 @@ export function createRunner(ctx, store) {
         const task = board.tasks.find(entry => entry.id === taskId);
         if (task === undefined)
             return;
-        const notes = task.notes.trim() === '' ? line : `${task.notes.trim()}\n${line}`;
+        const notes = mergeNote(task.notes, line);
         await store.update({ id: taskId, notes });
     }
     /**

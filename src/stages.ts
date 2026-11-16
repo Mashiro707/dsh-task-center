@@ -196,3 +196,20 @@ export async function readStageDoc(root: string, docPath: string): Promise<strin
 export function stageFile(root: string, docPath: string): string {
   return join(resolve(root), docPath)
 }
+
+/**
+ * Append a tagged note, replacing any earlier note with the same tag.
+ * @param {string} notes - the current note block.
+ * @param {string} line - the line to record, e.g. `[阶段 3] 改完了`.
+ * @returns {string} the new note block.
+ */
+export function mergeNote(notes: string, line: string): string {
+  const tag = /^\[([^\]]+)\]/.exec(line)
+  const kept =
+    tag === null
+      ? notes.split('\n')
+      : notes.split('\n').filter(entry => !entry.trimStart().startsWith(`[${tag[1]}]`))
+  const body = kept.join('\n').trim()
+  return body === '' ? line : `${body}\n${line}`
+}
+
